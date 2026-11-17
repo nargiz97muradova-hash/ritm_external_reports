@@ -8,6 +8,7 @@ import { buildTeamReportData } from "@/lib/report/build"
 import { SCALE_SECTIONS, TRAFFIC_TEXT } from "@/lib/report/definitions"
 import type { TeamReportData } from "@/lib/report/types"
 import { getProcedure, getTeamReport } from "@/lib/store"
+import type { Procedure } from "@/lib/types"
 import { CompetencyTraffic } from "./_components/competency-traffic"
 import { Heatmap } from "./_components/heatmap"
 import { IntegralMatrix } from "./_components/integral-matrix"
@@ -30,9 +31,11 @@ async function ReportData({ params }: Pick<PageProps<"/team-reports/[id]/report"
   const { id } = await params
   const report = await getTeamReport(id)
   if (!report) notFound()
-  const procedure = await getProcedure(report.procedureId)
-  if (!procedure) notFound()
-  return <Report reportId={report.id} data={buildTeamReportData(report, procedure)} />
+  const ids = [...new Set([report.leader, ...report.members].map((m) => m.procedureId))]
+  const procedures = (await Promise.all(ids.map(getProcedure))).filter(
+    (p): p is Procedure => p !== null,
+  )
+  return <Report reportId={report.id} data={buildTeamReportData(report, procedures)} />
 }
 
 function formatDateTime(iso: string) {
@@ -78,7 +81,10 @@ function Report({ reportId, data }: { reportId: string; data: TeamReportData }) 
           <Meta label="Дата и время создания отчёта" value={formatDateTime(data.createdAt)} />
           <Meta label="Опрос" value={data.survey} />
           <Meta label="Компания" value={data.company} />
-          <Meta label="Проект (процедура)" value={data.procedureName} />
+          <Meta
+            label={data.procedureNames.length > 1 ? "Проект (процедуры)" : "Проект (процедура)"}
+            value={data.procedureNames.join(", ") || "—"}
+          />
         </dl>
         {data.isDemo && (
           <p className="mt-4 flex items-start gap-2 rounded-lg bg-amber-50 p-3 text-xs text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">

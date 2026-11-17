@@ -47,28 +47,36 @@ export interface ProcedureInput {
 }
 
 /**
- * Командный отчёт: группа участников одной запущенной процедуры
- * и руководитель, который получает сводный отчёт по команде.
+ * Командный отчёт: команда из участников запущенных процедур
+ * (возможно, разных) и руководитель, который получает сводный отчёт.
  */
 export interface TeamReport {
   id: string
   name: string
-  procedureId: string
-  /** id участника процедуры — получателя отчёта */
-  leaderId: string
-  /** id участников процедуры, входящих в команду */
-  memberIds: string[]
+  /** Получатель отчёта — участник одной из процедур */
+  leader: MemberRef
+  /** Участники команды */
+  members: MemberRef[]
   reportAccess: Exclude<ReportAccess, null>
   creator: string
   /** ISO-дата и время */
   updatedAt: string
 }
 
+/** Ссылка на участника конкретной процедуры. */
+export interface MemberRef {
+  procedureId: string
+  participantId: string
+}
+
+export function memberKey(ref: MemberRef): string {
+  return `${ref.procedureId}:${ref.participantId}`
+}
+
 export interface TeamReportSummary {
   id: string
   name: string
-  procedureId: string
-  procedureName: string
+  procedures: { id: string; name: string }[]
   leaderName: string
   memberCount: number
   reportAccess: Exclude<ReportAccess, null>
@@ -78,15 +86,14 @@ export interface TeamReportSummary {
 
 export interface TeamReportInput {
   name: string
-  procedureId: string
-  leaderId: string
-  memberIds: string[]
+  leader: MemberRef | null
+  members: MemberRef[]
 }
 
-/** Процедура, доступная для командного отчёта, — с участниками. */
+/** Процедура, из которой можно набирать участников команды. */
 export type ProcedureOption = Pick<
   Procedure,
-  "id" | "name" | "status" | "startDate" | "endDate" | "participants"
+  "id" | "name" | "type" | "status" | "startDate" | "endDate" | "participants"
 >
 
 export const PROCEDURE_TYPES = ['Опросник "Zetic"'] as const

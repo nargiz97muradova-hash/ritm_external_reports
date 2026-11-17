@@ -39,8 +39,29 @@ async function readDb(): Promise<Db> {
   if (!Array.isArray(db.teamReports)) {
     db.teamReports = buildTeamReportSeed(db.procedures)
     await writeDb(db)
+  } else if (db.teamReports.some((r) => !Array.isArray(r.members))) {
+    db.teamReports = db.teamReports.map(migrateTeamReport)
+    await writeDb(db)
   }
   return db
+}
+
+/** Старый формат: одна процедура на отчёт (procedureId, leaderId, memberIds). */
+interface LegacyTeamReport {
+  procedureId: string
+  leaderId: string
+  memberIds: string[]
+}
+
+function migrateTeamReport(r: TeamReport | (TeamReport & LegacyTeamReport)): TeamReport {
+  if (Array.isArray(r.members)) return r
+  const legacy = r as TeamReport & LegacyTeamReport
+  const { procedureId, leaderId, memberIds, ...rest } = legacy
+  return {
+    ...rest,
+    leader: { procedureId, participantId: leaderId },
+    members: memberIds.map((participantId) => ({ procedureId, participantId })),
+  }
 }
 
 async function writeDb(db: Db): Promise<void> {
@@ -110,29 +131,30 @@ export function updateProcedure(
   })
 }
 
-/** Удаляет процедуру вместе с её командными отчётами. */
+/**
+ * Удаляет процедуру. Её участники убираются из командных отчётов;
+ * отчёт удаляется целиком, если из этой процедуры был руководитель или в команде никого не осталось.
+ */
 export function deleteProcedure(id: string): Promise<void> {
   return mutate((db) => {
     db.procedures = db.procedures.filter((p) => p.id !== id)
-    db.teamReports = db.teamReports.filter((r) => r.procedureId !== id)
+    db.teamReports = db.teamReports
+      .map((r) => ({ ...r, members: r.members.filter((m) => m.procedureId !== id) }))
+      .filter((r) => r.leader.procedureId !== id && r.members.length > 0)
   })
-}
-
-export async function countTeamReportsForProcedure(id: string): Promise<number> {
-  const db = await readDb()
-  return db.teamReports.filter((r) => r.procedureId === id).length
 }
 
 // ---------- Командные отчёты ----------
 
-/** Процедуры, по которым можно строить командные отчёты (запущенные и завершённые). */
+/** Процедуры, из которых можно набирать команды (запущенные и завершённые). */
 export async function listLaunchedProcedures(): Promise<ProcedureOption[]> {
   const db = await readDb()
   return db.procedures
     .filter((p) => p.status !== "draft")
-    .map(({ id, name, status, startDate, endDate, participants }) => ({
+    .map(({ id, name, type, status, startDate, endDate, participants }) => ({
       id,
       name,
+      type,
       status,
       startDate,
       endDate,
@@ -144,15 +166,19 @@ export async function listTeamReports(): Promise<TeamReportSummary[]> {
   const db = await readDb()
   const procedures = new Map(db.procedures.map((p) => [p.id, p]))
   return db.teamReports.map((r) => {
-    const procedure = procedures.get(r.procedureId)
-    const leader = procedure?.participants.find((p) => p.id === r.leaderId)
+    const leader = procedures
+      .get(r.leader.procedureId)
+      ?.participants.find((p) => p.id === r.leader.participantId)
+    const procedureIds = [...new Set([r.leader, ...r.members].map((m) => m.procedureId))]
     return {
       id: r.id,
       name: r.name,
-      procedureId: r.procedureId,
-      procedureName: procedure?.name ?? "—",
+      procedures: procedureIds.flatMap((pid) => {
+        const p = procedures.get(pid)
+        return p ? [{ id: p.id, name: p.name }] : []
+      }),
       leaderName: leader?.fullName ?? "—",
-      memberCount: r.memberIds.length,
+      memberCount: r.members.length,
       reportAccess: r.reportAccess,
       creator: r.creator,
       updatedAt: r.updatedAt,

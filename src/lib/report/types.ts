@@ -45,7 +45,7 @@ export interface TeamReportData {
   createdAt: string
   survey: string
   company: string
-  procedureName: string
+  procedureNames: string[]
   groups: ReportGroup[]
   participants: ReportParticipant[]
   integralAll: IntegralPoint[]

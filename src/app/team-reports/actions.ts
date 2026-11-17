@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache"
 import { CURRENT_USER } from "@/lib/current-user"
 import * as store from "@/lib/store"
-import type { ReportAccess, TeamReportInput } from "@/lib/types"
+import { memberKey, type MemberRef, type ReportAccess, type TeamReportInput } from "@/lib/types"
 
 // TODO: при подключении к реальной системе — проверять права пользователя в каждом действии.
 
@@ -17,23 +17,42 @@ function revalidate() {
   revalidatePath("/team-reports", "layout")
 }
 
-/** Проверяет ввод и возвращает нормализованные данные или текст ошибки. */
+interface Checked {
+  name: string
+  leader: MemberRef
+  members: MemberRef[]
+}
+
+/** Проверяет ввод: руководитель и участники — из запущенных процедур, без повторов. */
 async function check(
   input: TeamReportInput,
-): Promise<{ ok: true; data: TeamReportInput } | { ok: false; error: string }> {
+): Promise<{ ok: true; data: Checked } | { ok: false; error: string }> {
   const name = input.name.trim()
   if (!name) return fail("Укажите название отчёта")
-  const procedure = await store.getProcedure(input.procedureId)
-  if (!procedure) return fail("Выберите процедуру")
-  if (procedure.status === "draft")
-    return fail("Командный отчёт можно создать только по запущенной процедуре")
-  const ids = new Set(procedure.participants.map((p) => p.id))
-  if (!ids.has(input.leaderId)) return fail("Выберите руководителя из участников процедуры")
-  const memberIds = [...new Set(input.memberIds)].filter((id) => id !== input.leaderId)
-  if (memberIds.length === 0) return fail("Добавьте в команду хотя бы одного участника")
-  if (memberIds.some((id) => !ids.has(id)))
-    return fail("В команде есть участники, которых нет в выбранной процедуре")
-  return { ok: true, data: { name, procedureId: procedure.id, leaderId: input.leaderId, memberIds } }
+  if (!input.leader) return fail("Выберите руководителя")
+
+  const procedures = new Map((await store.listLaunchedProcedures()).map((p) => [p.id, p]))
+  const find = (ref: MemberRef) =>
+    procedures.get(ref.procedureId)?.participants.find((p) => p.id === ref.participantId)
+
+  const leader = find(input.leader)
+  if (!leader) return fail("Руководитель должен быть участником запущенной процедуры")
+
+  const seenKeys = new Set<string>([memberKey(input.leader)])
+  const seenLogins = new Set<string>([leader.externalLogin.toLowerCase()])
+  const members: MemberRef[] = []
+  for (const ref of input.members) {
+    const participant = find(ref)
+    if (!participant)
+      return fail("В команде есть участники, которых нет в запущенных процедурах")
+    const login = participant.externalLogin.toLowerCase()
+    if (seenKeys.has(memberKey(ref)) || seenLogins.has(login)) continue
+    seenKeys.add(memberKey(ref))
+    seenLogins.add(login)
+    members.push({ procedureId: ref.procedureId, participantId: ref.participantId })
+  }
+  if (members.length === 0) return fail("Добавьте в команду хотя бы одного участника")
+  return { ok: true, data: { name, leader: input.leader, members } }
 }
 
 export async function createTeamReportAction(
@@ -82,9 +101,8 @@ export async function duplicateTeamReportAction(id: string): Promise<Result<{ id
   if (!source) return fail("Командный отчёт не найден")
   const created = await store.insertTeamReport({
     name: `${source.name} (копия)`,
-    procedureId: source.procedureId,
-    leaderId: source.leaderId,
-    memberIds: [...source.memberIds],
+    leader: { ...source.leader },
+    members: source.members.map((m) => ({ ...m })),
     reportAccess: "closed",
     creator: CURRENT_USER.fullName,
     updatedAt: new Date().toISOString(),

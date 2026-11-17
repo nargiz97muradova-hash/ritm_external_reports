@@ -1,5 +1,5 @@
 import { ORGANIZATION } from "@/lib/organization"
-import type { Procedure, TeamReport } from "@/lib/types"
+import { memberKey, type MemberRef, type Procedure, type TeamReport } from "@/lib/types"
 import { COMPETENCIES, SCALE_SECTIONS } from "./definitions"
 import { demoResults } from "./demo-results"
 import type {
@@ -29,26 +29,33 @@ function integral(participants: ReportParticipant[]): IntegralPoint[] {
   })
 }
 
-/** Собирает данные командного отчёта: участники, группы и агрегаты. */
-export function buildTeamReportData(report: TeamReport, procedure: Procedure): TeamReportData {
-  const byId = new Map(procedure.participants.map((p) => [p.id, p]))
+/**
+ * Собирает данные командного отчёта: участники, группы и агрегаты.
+ * Участники команды могут быть из разных процедур.
+ */
+export function buildTeamReportData(report: TeamReport, procedures: Procedure[]): TeamReportData {
+  const byProcedure = new Map(procedures.map((p) => [p.id, p]))
+  const find = (ref: MemberRef) =>
+    byProcedure.get(ref.procedureId)?.participants.find((p) => p.id === ref.participantId)
+
   const people = [
-    ...(byId.has(report.leaderId) ? [{ id: report.leaderId, group: "leader" as const }] : []),
-    ...report.memberIds.filter((id) => byId.has(id)).map((id) => ({ id, group: "team" as const })),
-  ]
+    { ref: report.leader, group: "leader" as const },
+    ...report.members.map((ref) => ({ ref, group: "team" as const })),
+  ].flatMap(({ ref, group }) => {
+    const p = find(ref)
+    return p ? [{ ref, group, p }] : []
+  })
 
   const participants: ReportParticipant[] = people
-    .map(({ id, group }) => {
-      const p = byId.get(id)!
-      return {
-        number: 0,
-        id,
-        fullName: p.fullName,
-        position: p.position,
-        group,
-        results: demoResults(id),
-      }
-    })
+    .map(({ ref, group, p }) => ({
+      number: 0,
+      id: memberKey(ref),
+      fullName: p.fullName,
+      position: p.position,
+      group,
+      // Результаты привязаны к человеку в процедуре — как в источнике оценки.
+      results: demoResults(ref.participantId),
+    }))
     .sort((a, b) => a.fullName.localeCompare(b.fullName, "ru"))
     .map((p, i) => ({ ...p, number: i + 1 }))
 
@@ -73,12 +80,14 @@ export function buildTeamReportData(report: TeamReport, procedure: Procedure): T
     }
   }
 
+  const used = procedures.filter((p) => people.some(({ ref }) => ref.procedureId === p.id))
+
   return {
     title: report.name,
     createdAt: report.updatedAt,
-    survey: procedure.type,
+    survey: [...new Set(used.map((p) => p.type))].join(", ") || "—",
     company: ORGANIZATION.name,
-    procedureName: procedure.name,
+    procedureNames: used.map((p) => p.name),
     groups,
     participants,
     integralAll: integral(participants),

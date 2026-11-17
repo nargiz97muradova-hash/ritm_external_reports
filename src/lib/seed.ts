@@ -102,9 +102,8 @@ export function buildTeamReportSeed(procedures: Procedure[]): TeamReport[] {
       reports.push({
         id: String(reports.length + 1),
         name: `${unit.replace(/^Департамент\s+/i, "Команда: ")}`,
-        procedureId: procedure.id,
-        leaderId: team[0].id,
-        memberIds: team.slice(1).map((m) => m.id),
+        leader: { procedureId: procedure.id, participantId: team[0].id },
+        members: team.slice(1).map((m) => ({ procedureId: procedure.id, participantId: m.id })),
         reportAccess: reports.length % 2 === 0 ? "closed" : "open",
         creator: procedure.creator,
         updatedAt: procedure.updatedAt,

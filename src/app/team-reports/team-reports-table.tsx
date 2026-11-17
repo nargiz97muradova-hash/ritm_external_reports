@@ -26,11 +26,11 @@ import { TeamReportActionsMenu } from "./_components/team-report-actions-menu"
 
 const PAGE_SIZE = 10
 
-type SortKey = "name" | "procedureName" | "leaderName" | "memberCount" | "updatedAt"
+type SortKey = "name" | "procedures" | "leaderName" | "memberCount" | "updatedAt"
 
 const COLUMNS: Array<{ label: string; sort?: SortKey; className?: string }> = [
   { label: "Название", sort: "name", className: "w-[18%]" },
-  { label: "Процедура", sort: "procedureName" },
+  { label: "Процедуры", sort: "procedures" },
   { label: "Руководитель", sort: "leaderName" },
   { label: "Участников", sort: "memberCount" },
   { label: "Доступ к отчёту", className: "w-40" },
@@ -48,7 +48,9 @@ export function TeamReportsTable({ reports }: { reports: TeamReportSummary[] }) 
   const sorted = useMemo(() => {
     if (!sort) return reports
     const factor = sort.dir === "asc" ? 1 : -1
-    return [...reports].sort((a, b) => factor * compareValues(a[sort.key], b[sort.key]))
+    const value = (r: TeamReportSummary) =>
+      sort.key === "procedures" ? r.procedures.map((p) => p.name).join(", ") : r[sort.key]
+    return [...reports].sort((a, b) => factor * compareValues(value(a), value(b)))
   }, [reports, sort])
 
   const pageCount = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE))
@@ -95,7 +97,7 @@ export function TeamReportsTable({ reports }: { reports: TeamReportSummary[] }) 
               <TableRow>
                 <TableCell colSpan={COLUMNS.length} className="h-24 text-center text-muted-foreground">
                   Командных отчётов пока нет. Нажмите «Создать», чтобы собрать команду из участников
-                  запущенной процедуры.
+                  запущенных процедур.
                 </TableCell>
               </TableRow>
             )}
@@ -107,9 +109,15 @@ export function TeamReportsTable({ reports }: { reports: TeamReportSummary[] }) 
                   </Link>
                 </TableCell>
                 <TableCell className="max-w-56 whitespace-normal">
-                  <Link href={`/procedures/${r.procedureId}`} className="hover:text-primary hover:underline">
-                    {r.procedureName}
-                  </Link>
+                  {r.procedures.length === 0 && <span className="text-muted-foreground">—</span>}
+                  {r.procedures.map((p, i) => (
+                    <span key={p.id}>
+                      {i > 0 && ", "}
+                      <Link href={`/procedures/${p.id}`} className="hover:text-primary hover:underline">
+                        {p.name}
+                      </Link>
+                    </span>
+                  ))}
                 </TableCell>
                 <TableCell>{r.leaderName}</TableCell>
                 <TableCell className="tabular-nums">{r.memberCount}</TableCell>
