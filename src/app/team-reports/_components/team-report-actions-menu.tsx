@@ -52,7 +52,7 @@ export function TeamReportActionsMenu({
       const next = access === "open" ? "closed" : "open"
       const res = await setTeamReportAccessAction(id, next)
       if (!res.ok) return void toast.error(res.error)
-      toast.success(next === "open" ? "Доступ руководителю открыт" : "Доступ руководителю закрыт")
+      toast.success(next === "open" ? "Доступ руководителям открыт" : "Доступ руководителям закрыт")
       router.refresh()
     })
   }

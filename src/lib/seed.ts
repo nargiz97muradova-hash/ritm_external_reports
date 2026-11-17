@@ -1,5 +1,6 @@
 import type { Participant, Procedure, TeamReport } from "./types"
 import { buildExternalLink } from "./links"
+import { HRBP_DIRECTORY } from "./hrbp"
 
 // Все данные вымышленные — только для демонстрации интерфейса.
 
@@ -102,7 +103,8 @@ export function buildTeamReportSeed(procedures: Procedure[]): TeamReport[] {
       reports.push({
         id: String(reports.length + 1),
         name: `${unit.replace(/^Департамент\s+/i, "Команда: ")}`,
-        leader: { procedureId: procedure.id, participantId: team[0].id },
+        leaders: [{ procedureId: procedure.id, participantId: team[0].id }],
+        hrbpIds: [HRBP_DIRECTORY[reports.length % HRBP_DIRECTORY.length].id],
         members: team.slice(1).map((m) => ({ procedureId: procedure.id, participantId: m.id })),
         reportAccess: reports.length % 2 === 0 ? "closed" : "open",
         creator: procedure.creator,

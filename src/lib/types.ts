@@ -47,14 +47,17 @@ export interface ProcedureInput {
 }
 
 /**
- * Командный отчёт: команда из участников запущенных процедур
- * (возможно, разных) и руководитель, который получает сводный отчёт.
+ * Командный отчёт: команда из участников запущенных процедур (возможно, разных).
+ * Руководители видят отчёт на главной странице сервиса «Оценка» в разделе «Внешняя оценка»,
+ * HRBP — в разделе «Администрирование → Внешняя оценка».
  */
 export interface TeamReport {
   id: string
   name: string
-  /** Получатель отчёта — участник одной из процедур */
-  leader: MemberRef
+  /** Руководители — получатели отчёта (участники процедур) */
+  leaders: MemberRef[]
+  /** id HRBP из справочника */
+  hrbpIds: string[]
   /** Участники команды */
   members: MemberRef[]
   reportAccess: Exclude<ReportAccess, null>
@@ -77,7 +80,8 @@ export interface TeamReportSummary {
   id: string
   name: string
   procedures: { id: string; name: string }[]
-  leaderName: string
+  leaderNames: string[]
+  hrbpNames: string[]
   memberCount: number
   reportAccess: Exclude<ReportAccess, null>
   creator: string
@@ -86,7 +90,8 @@ export interface TeamReportSummary {
 
 export interface TeamReportInput {
   name: string
-  leader: MemberRef | null
+  leaders: MemberRef[]
+  hrbpIds: string[]
   members: MemberRef[]
 }
 

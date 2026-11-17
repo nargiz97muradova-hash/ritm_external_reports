@@ -39,7 +39,7 @@ export function buildTeamReportData(report: TeamReport, procedures: Procedure[])
     byProcedure.get(ref.procedureId)?.participants.find((p) => p.id === ref.participantId)
 
   const people = [
-    { ref: report.leader, group: "leader" as const },
+    ...report.leaders.map((ref) => ({ ref, group: "leader" as const })),
     ...report.members.map((ref) => ({ ref, group: "team" as const })),
   ].flatMap(({ ref, group }) => {
     const p = find(ref)
@@ -61,7 +61,7 @@ export function buildTeamReportData(report: TeamReport, procedures: Procedure[])
 
   const groups: ReportGroup[] = [
     { id: "team", name: report.name },
-    { id: "leader", name: "Руководитель" },
+    { id: "leader", name: report.leaders.length > 1 ? "Руководители" : "Руководитель" },
   ]
   const team = participants.filter((p) => p.group === "team")
   const leader = participants.filter((p) => p.group === "leader")

@@ -2,8 +2,9 @@
 
 import { revalidatePath } from "next/cache"
 import { CURRENT_USER } from "@/lib/current-user"
+import { HRBP_IDS } from "@/lib/hrbp"
 import * as store from "@/lib/store"
-import { memberKey, type MemberRef, type ReportAccess, type TeamReportInput } from "@/lib/types"
+import { type MemberRef, type ReportAccess, type TeamReportInput } from "@/lib/types"
 
 // TODO: при подключении к реальной системе — проверять права пользователя в каждом действии.
 
@@ -19,40 +20,48 @@ function revalidate() {
 
 interface Checked {
   name: string
-  leader: MemberRef
+  leaders: MemberRef[]
+  hrbpIds: string[]
   members: MemberRef[]
 }
 
-/** Проверяет ввод: руководитель и участники — из запущенных процедур, без повторов. */
+/**
+ * Проверяет ввод: руководители и участники — из запущенных процедур,
+ * один человек (по логину) встречается только один раз, HRBP — из закрытого перечня.
+ */
 async function check(
   input: TeamReportInput,
 ): Promise<{ ok: true; data: Checked } | { ok: false; error: string }> {
   const name = input.name.trim()
   if (!name) return fail("Укажите название отчёта")
-  if (!input.leader) return fail("Выберите руководителя")
+  if (input.leaders.length === 0) return fail("Выберите хотя бы одного руководителя")
+  if (input.hrbpIds.some((id) => !HRBP_IDS.has(id))) return fail("Выбран HRBP не из справочника")
 
   const procedures = new Map((await store.listLaunchedProcedures()).map((p) => [p.id, p]))
   const find = (ref: MemberRef) =>
     procedures.get(ref.procedureId)?.participants.find((p) => p.id === ref.participantId)
 
-  const leader = find(input.leader)
-  if (!leader) return fail("Руководитель должен быть участником запущенной процедуры")
-
-  const seenKeys = new Set<string>([memberKey(input.leader)])
-  const seenLogins = new Set<string>([leader.externalLogin.toLowerCase()])
-  const members: MemberRef[] = []
-  for (const ref of input.members) {
-    const participant = find(ref)
-    if (!participant)
-      return fail("В команде есть участники, которых нет в запущенных процедурах")
-    const login = participant.externalLogin.toLowerCase()
-    if (seenKeys.has(memberKey(ref)) || seenLogins.has(login)) continue
-    seenKeys.add(memberKey(ref))
-    seenLogins.add(login)
-    members.push({ procedureId: ref.procedureId, participantId: ref.participantId })
+  const seenLogins = new Set<string>()
+  /** Оставляет уникальных по логину; null — если кого-то нет в запущенных процедурах. */
+  const unique = (refs: MemberRef[]): MemberRef[] | null => {
+    const result: MemberRef[] = []
+    for (const ref of refs) {
+      const person = find(ref)
+      if (!person) return null
+      const login = person.externalLogin.toLowerCase()
+      if (seenLogins.has(login)) continue
+      seenLogins.add(login)
+      result.push({ procedureId: ref.procedureId, participantId: ref.participantId })
+    }
+    return result
   }
+
+  const leaders = unique(input.leaders)
+  if (!leaders) return fail("Руководители должны быть участниками запущенных процедур")
+  const members = unique(input.members)
+  if (!members) return fail("В команде есть участники, которых нет в запущенных процедурах")
   if (members.length === 0) return fail("Добавьте в команду хотя бы одного участника")
-  return { ok: true, data: { name, leader: input.leader, members } }
+  return { ok: true, data: { name, leaders, hrbpIds: [...new Set(input.hrbpIds)], members } }
 }
 
 export async function createTeamReportAction(
@@ -101,7 +110,8 @@ export async function duplicateTeamReportAction(id: string): Promise<Result<{ id
   if (!source) return fail("Командный отчёт не найден")
   const created = await store.insertTeamReport({
     name: `${source.name} (копия)`,
-    leader: { ...source.leader },
+    leaders: source.leaders.map((m) => ({ ...m })),
+    hrbpIds: [...source.hrbpIds],
     members: source.members.map((m) => ({ ...m })),
     reportAccess: "closed",
     creator: CURRENT_USER.fullName,

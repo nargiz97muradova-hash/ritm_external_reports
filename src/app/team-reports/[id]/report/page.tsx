@@ -31,7 +31,7 @@ async function ReportData({ params }: Pick<PageProps<"/team-reports/[id]/report"
   const { id } = await params
   const report = await getTeamReport(id)
   if (!report) notFound()
-  const ids = [...new Set([report.leader, ...report.members].map((m) => m.procedureId))]
+  const ids = [...new Set([...report.leaders, ...report.members].map((m) => m.procedureId))]
   const procedures = (await Promise.all(ids.map(getProcedure))).filter(
     (p): p is Procedure => p !== null,
   )

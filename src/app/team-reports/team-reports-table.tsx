@@ -26,12 +26,13 @@ import { TeamReportActionsMenu } from "./_components/team-report-actions-menu"
 
 const PAGE_SIZE = 10
 
-type SortKey = "name" | "procedures" | "leaderName" | "memberCount" | "updatedAt"
+type SortKey = "name" | "procedures" | "leaders" | "hrbp" | "memberCount" | "updatedAt"
 
 const COLUMNS: Array<{ label: string; sort?: SortKey; className?: string }> = [
   { label: "Название", sort: "name", className: "w-[18%]" },
   { label: "Процедуры", sort: "procedures" },
-  { label: "Руководитель", sort: "leaderName" },
+  { label: "Руководители", sort: "leaders" },
+  { label: "HRBP", sort: "hrbp" },
   { label: "Участников", sort: "memberCount" },
   { label: "Доступ к отчёту", className: "w-40" },
   { label: "Создатель отчёта" },
@@ -49,7 +50,13 @@ export function TeamReportsTable({ reports }: { reports: TeamReportSummary[] }) 
     if (!sort) return reports
     const factor = sort.dir === "asc" ? 1 : -1
     const value = (r: TeamReportSummary) =>
-      sort.key === "procedures" ? r.procedures.map((p) => p.name).join(", ") : r[sort.key]
+      sort.key === "procedures"
+        ? r.procedures.map((p) => p.name).join(", ")
+        : sort.key === "leaders"
+          ? r.leaderNames.join(", ")
+          : sort.key === "hrbp"
+            ? r.hrbpNames.join(", ")
+            : r[sort.key]
     return [...reports].sort((a, b) => factor * compareValues(value(a), value(b)))
   }, [reports, sort])
 
@@ -62,7 +69,7 @@ export function TeamReportsTable({ reports }: { reports: TeamReportSummary[] }) 
       const next = r.reportAccess === "open" ? "closed" : "open"
       const res = await setTeamReportAccessAction(r.id, next)
       if (!res.ok) return void toast.error(res.error)
-      toast.success(next === "open" ? "Доступ руководителю открыт" : "Доступ руководителю закрыт")
+      toast.success(next === "open" ? "Доступ руководителям открыт" : "Доступ руководителям закрыт")
       router.refresh()
     })
   }
@@ -70,7 +77,7 @@ export function TeamReportsTable({ reports }: { reports: TeamReportSummary[] }) 
   return (
     <div className="p-4 pt-3">
       <div className="overflow-x-auto rounded-lg">
-        <Table className="min-w-[1100px] text-xs">
+        <Table className="min-w-[1250px] text-xs">
           <TableHeader className="bg-table-head">
             <TableRow className="hover:bg-transparent">
               {COLUMNS.map((col) => (
@@ -119,7 +126,12 @@ export function TeamReportsTable({ reports }: { reports: TeamReportSummary[] }) 
                     </span>
                   ))}
                 </TableCell>
-                <TableCell>{r.leaderName}</TableCell>
+                <TableCell className="max-w-52 whitespace-normal">
+                  <NameList names={r.leaderNames} />
+                </TableCell>
+                <TableCell className="max-w-48 whitespace-normal">
+                  <NameList names={r.hrbpNames} />
+                </TableCell>
                 <TableCell className="tabular-nums">{r.memberCount}</TableCell>
                 <TableCell>
                   <div className="flex items-center justify-between gap-2">
@@ -165,5 +177,17 @@ export function TeamReportsTable({ reports }: { reports: TeamReportSummary[] }) 
       </div>
       <SimplePagination total={reports.length} page={current} pageCount={pageCount} onPageChange={setPage} />
     </div>
+  )
+}
+
+/** Первые два имени и «ещё N» — полный список во всплывающей подсказке. */
+function NameList({ names }: { names: string[] }) {
+  if (names.length === 0) return <span className="text-muted-foreground">—</span>
+  const shown = names.slice(0, 2)
+  return (
+    <span title={names.join("\n")}>
+      {shown.join(", ")}
+      {names.length > 2 && <span className="text-muted-foreground"> и ещё {names.length - 2}</span>}
+    </span>
   )
 }

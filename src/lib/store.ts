@@ -3,7 +3,9 @@ import "server-only"
 import { promises as fs } from "node:fs"
 import path from "node:path"
 import { buildSeed, buildTeamReportSeed } from "./seed"
+import { HRBP_DIRECTORY } from "./hrbp"
 import type {
+  MemberRef,
   Procedure,
   ProcedureOption,
   ProcedureSummary,
@@ -39,29 +41,38 @@ async function readDb(): Promise<Db> {
   if (!Array.isArray(db.teamReports)) {
     db.teamReports = buildTeamReportSeed(db.procedures)
     await writeDb(db)
-  } else if (db.teamReports.some((r) => !Array.isArray(r.members))) {
+  } else if (db.teamReports.some((r) => !Array.isArray(r.members) || !Array.isArray(r.leaders))) {
     db.teamReports = db.teamReports.map(migrateTeamReport)
     await writeDb(db)
   }
   return db
 }
 
-/** Старый формат: одна процедура на отчёт (procedureId, leaderId, memberIds). */
-interface LegacyTeamReport {
-  procedureId: string
-  leaderId: string
-  memberIds: string[]
+/**
+ * Старые форматы:
+ * v1 — одна процедура (procedureId, leaderId, memberIds);
+ * v2 — один руководитель (leader), без HRBP.
+ */
+type LegacyTeamReport = Partial<TeamReport> & {
+  procedureId?: string
+  leaderId?: string
+  memberIds?: string[]
+  leader?: MemberRef
 }
 
-function migrateTeamReport(r: TeamReport | (TeamReport & LegacyTeamReport)): TeamReport {
-  if (Array.isArray(r.members)) return r
-  const legacy = r as TeamReport & LegacyTeamReport
-  const { procedureId, leaderId, memberIds, ...rest } = legacy
-  return {
-    ...rest,
-    leader: { procedureId, participantId: leaderId },
-    members: memberIds.map((participantId) => ({ procedureId, participantId })),
-  }
+function migrateTeamReport(r: LegacyTeamReport): TeamReport {
+  const { procedureId, leaderId, memberIds, leader, ...rest } = r
+  const members =
+    rest.members ??
+    (memberIds ?? []).map((participantId) => ({ procedureId: procedureId!, participantId }))
+  const leaders =
+    rest.leaders ??
+    (leader
+      ? [leader]
+      : leaderId
+        ? [{ procedureId: procedureId!, participantId: leaderId }]
+        : [])
+  return { ...(rest as TeamReport), members, leaders, hrbpIds: rest.hrbpIds ?? [] }
 }
 
 async function writeDb(db: Db): Promise<void> {
@@ -132,15 +143,19 @@ export function updateProcedure(
 }
 
 /**
- * Удаляет процедуру. Её участники убираются из командных отчётов;
- * отчёт удаляется целиком, если из этой процедуры был руководитель или в команде никого не осталось.
+ * Удаляет процедуру. Её участники и руководители убираются из командных отчётов;
+ * отчёт удаляется целиком, если в нём не осталось руководителей или участников.
  */
 export function deleteProcedure(id: string): Promise<void> {
   return mutate((db) => {
     db.procedures = db.procedures.filter((p) => p.id !== id)
     db.teamReports = db.teamReports
-      .map((r) => ({ ...r, members: r.members.filter((m) => m.procedureId !== id) }))
-      .filter((r) => r.leader.procedureId !== id && r.members.length > 0)
+      .map((r) => ({
+        ...r,
+        leaders: r.leaders.filter((m) => m.procedureId !== id),
+        members: r.members.filter((m) => m.procedureId !== id),
+      }))
+      .filter((r) => r.leaders.length > 0 && r.members.length > 0)
   })
 }
 
@@ -166,10 +181,9 @@ export async function listTeamReports(): Promise<TeamReportSummary[]> {
   const db = await readDb()
   const procedures = new Map(db.procedures.map((p) => [p.id, p]))
   return db.teamReports.map((r) => {
-    const leader = procedures
-      .get(r.leader.procedureId)
-      ?.participants.find((p) => p.id === r.leader.participantId)
-    const procedureIds = [...new Set([r.leader, ...r.members].map((m) => m.procedureId))]
+    const find = (ref: MemberRef) =>
+      procedures.get(ref.procedureId)?.participants.find((p) => p.id === ref.participantId)
+    const procedureIds = [...new Set([...r.leaders, ...r.members].map((m) => m.procedureId))]
     return {
       id: r.id,
       name: r.name,
@@ -177,7 +191,8 @@ export async function listTeamReports(): Promise<TeamReportSummary[]> {
         const p = procedures.get(pid)
         return p ? [{ id: p.id, name: p.name }] : []
       }),
-      leaderName: leader?.fullName ?? "—",
+      leaderNames: r.leaders.flatMap((ref) => find(ref)?.fullName ?? []),
+      hrbpNames: r.hrbpIds.flatMap((hid) => HRBP_DIRECTORY.find((h) => h.id === hid)?.fullName ?? []),
       memberCount: r.members.length,
       reportAccess: r.reportAccess,
       creator: r.creator,

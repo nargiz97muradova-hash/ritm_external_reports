@@ -30,13 +30,15 @@ import {
   updateTeamReportAction,
 } from "../actions"
 import { AddMembersDialog } from "./add-members-dialog"
-import { LeaderPicker } from "./leader-picker"
+import { HrbpPicker } from "./hrbp-picker"
+import { LeadersPicker } from "./leader-picker"
 import { TeamReportActionsMenu } from "./team-report-actions-menu"
 
 function toInput(report: TeamReport | null): TeamReportInput {
   return {
     name: report?.name ?? "",
-    leader: report?.leader ?? null,
+    leaders: report?.leaders ?? [],
+    hrbpIds: report?.hrbpIds ?? [],
     members: report?.members ?? [],
   }
 }
@@ -87,18 +89,22 @@ export function TeamReportEditor({
     return map
   }, [procedures])
 
-  const leader = form.leader ? lookup.get(memberKey(form.leader)) : undefined
+  const leaders = useMemo(
+    () => form.leaders.map((ref) => lookup.get(memberKey(ref))).filter((m) => m !== undefined),
+    [form.leaders, lookup],
+  )
   const members = useMemo(
     () => form.members.map((ref) => lookup.get(memberKey(ref))).filter((m) => m !== undefined),
     [form.members, lookup],
   )
-  const takenKeys = useMemo(
-    () => new Set([...form.members, ...(form.leader ? [form.leader] : [])].map(memberKey)),
-    [form.members, form.leader],
+  const memberKeys = useMemo(() => new Set(form.members.map(memberKey)), [form.members])
+  const memberLogins = useMemo(
+    () => new Set(members.map((m) => m.externalLogin.toLowerCase())),
+    [members],
   )
-  const takenLogins = useMemo(
-    () => new Set([...members, ...(leader ? [leader] : [])].map((m) => m.externalLogin.toLowerCase())),
-    [members, leader],
+  const leaderLogins = useMemo(
+    () => new Set(leaders.map((m) => m.externalLogin.toLowerCase())),
+    [leaders],
   )
 
   const view = useParticipantView(members)
@@ -110,24 +116,11 @@ export function TeamReportEditor({
 
   const errors = {
     name: !form.name.trim() ? "Укажите название" : null,
-    leader: !leader ? "Выберите руководителя" : null,
+    leaders: leaders.length === 0 ? "Выберите хотя бы одного руководителя" : null,
     members: members.length === 0 ? "Добавьте в команду хотя бы одного участника" : null,
   }
   const hasErrors = Object.values(errors).some(Boolean)
   const show = (key: keyof typeof errors) => (submitted ? errors[key] : null)
-
-  function setLeader(ref: MemberRef) {
-    const person = lookup.get(memberKey(ref))
-    const login = person?.externalLogin.toLowerCase()
-    // Руководитель не может одновременно быть участником команды (в том числе из другой процедуры).
-    setForm((f) => ({
-      ...f,
-      leader: ref,
-      members: f.members.filter(
-        (m) => lookup.get(memberKey(m))?.externalLogin.toLowerCase() !== login,
-      ),
-    }))
-  }
 
   function removeSelected() {
     const n = selected.size
@@ -162,7 +155,7 @@ export function TeamReportEditor({
       const next = report.reportAccess === "open" ? "closed" : "open"
       const res = await setTeamReportAccessAction(report.id, next)
       if (!res.ok) return void toast.error(res.error)
-      toast.success(next === "open" ? "Доступ руководителю открыт" : "Доступ руководителю закрыт")
+      toast.success(next === "open" ? "Доступ руководителям открыт" : "Доступ руководителям закрыт")
       router.refresh()
     })
   }
@@ -190,7 +183,7 @@ export function TeamReportEditor({
           {report && (
             <div className="ml-auto flex flex-wrap items-center gap-2">
               <span className="inline-flex items-center gap-2 rounded-lg bg-muted px-2.5 py-1 text-xs">
-                Доступ руководителя: <AccessStatus access={report.reportAccess} />
+                Доступ руководителей: <AccessStatus access={report.reportAccess} />
               </span>
               <Button variant="outline" disabled={pending} onClick={toggleAccess}>
                 {report.reportAccess === "open" ? <LockIcon /> : <LockOpenIcon />}
@@ -213,7 +206,7 @@ export function TeamReportEditor({
             </div>
           )}
         </div>
-        <div className="grid gap-4 p-4 md:grid-cols-2">
+        <div className="grid gap-4 p-4 lg:grid-cols-3">
           <Field id="name" label="Название" error={show("name")}>
             <Input
               id="name"
@@ -223,13 +216,31 @@ export function TeamReportEditor({
               onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
             />
           </Field>
-          <Field id="leader" label="Руководитель" error={show("leader")}>
-            <LeaderPicker
-              id="leader"
+          <Field
+            id="leaders"
+            label="Руководители"
+            error={show("leaders")}
+            hint="Увидят отчёт на главной странице сервиса «Оценка» в разделе «Внешняя оценка»"
+          >
+            <LeadersPicker
+              id="leaders"
               procedures={procedures}
-              value={form.leader}
-              invalid={!!show("leader")}
-              onChange={setLeader}
+              value={form.leaders}
+              memberLogins={memberLogins}
+              invalid={!!show("leaders")}
+              onChange={(leaders) => setForm((f) => ({ ...f, leaders }))}
+            />
+          </Field>
+          <Field
+            id="hrbp"
+            label="HRBP"
+            required={false}
+            hint="Увидят отчёт в разделе «Администрирование → Внешняя оценка»"
+          >
+            <HrbpPicker
+              id="hrbp"
+              value={form.hrbpIds}
+              onChange={(hrbpIds) => setForm((f) => ({ ...f, hrbpIds }))}
             />
           </Field>
         </div>
@@ -339,7 +350,9 @@ export function TeamReportEditor({
             {show("members") ??
               (members.length > 0
                 ? `В команде ${members.length} ${pluralRu(members.length, "участник", "участника", "участников")}` +
-                  (leader ? " и руководитель" : "") +
+                  (leaders.length
+                    ? ` и ${leaders.length} ${pluralRu(leaders.length, "руководитель", "руководителя", "руководителей")}`
+                    : "") +
                   (view.isFiltered ? `, показано ${rows.length}` : "")
                 : null)}
           </p>
@@ -356,8 +369,9 @@ export function TeamReportEditor({
         open={addOpen}
         onOpenChange={setAddOpen}
         procedures={procedures}
-        takenKeys={takenKeys}
-        takenLogins={takenLogins}
+        memberKeys={memberKeys}
+        memberLogins={memberLogins}
+        leaderLogins={leaderLogins}
         onAdd={(refs) => {
           setForm((f) => ({ ...f, members: [...f.members, ...refs] }))
           setAddOpen(false)
@@ -374,21 +388,29 @@ function Field({
   id,
   label,
   error,
+  hint,
+  required = true,
   children,
 }: {
   id: string
   label: string
   error?: string | null
+  hint?: string
+  required?: boolean
   children: React.ReactNode
 }) {
   return (
-    <div className="grid content-start gap-1.5">
+    <div className="grid min-w-0 grid-cols-1 content-start gap-1.5">
       <Label htmlFor={id} className="text-xs font-semibold">
-        <span className="text-destructive">*</span>
+        {required && <span className="text-destructive">*</span>}
         {label}
       </Label>
       {children}
-      {error && <p className="text-xs text-destructive">{error}</p>}
+      {error ? (
+        <p className="text-xs text-destructive">{error}</p>
+      ) : (
+        hint && <p className="text-[11px] leading-snug text-pretty text-muted-foreground">{hint}</p>
+      )}
     </div>
   )
 }
