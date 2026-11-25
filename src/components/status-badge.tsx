@@ -23,6 +23,7 @@ export function StatusBadge({ status }: { status: ProcedureStatus }) {
 const TEAM_STYLES: Record<TeamReportStatus, string> = {
   draft: "bg-muted text-foreground/80",
   active: "bg-success/10 text-success",
+  archived: "bg-foreground/10 text-foreground/70",
 }
 
 export function TeamReportStatusBadge({ status }: { status: TeamReportStatus }) {

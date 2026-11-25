@@ -3,8 +3,11 @@ import "server-only"
 import { promises as fs } from "node:fs"
 import path from "node:path"
 import { CURRENT_USER } from "./current-user"
+import { allReportContentSectionIds } from "./report/definitions"
 import { buildSeed, buildTeamReportSeed } from "./seed"
 import type {
+  EmployeeSearchHit,
+  Participant,
   Procedure,
   ProcedureOption,
   ProcedureSummary,
@@ -41,7 +44,24 @@ async function readDb(): Promise<Db> {
     db.teamReports = buildTeamReportSeed(db.procedures)
     await writeDb(db)
   }
-  if (db.teamReports.some((report) => migrateTeamReport(report))) await writeDb(db)
+  let touched = false
+  if (db.teamReports.some((report) => migrateTeamReport(report))) touched = true
+  for (const procedure of db.procedures) {
+    for (const person of procedure.participants) {
+      if (!("reportFormedAt" in person)) {
+        person.reportFormedAt =
+          person.reportAccess !== null ? procedure.updatedAt : null
+        touched = true
+      }
+      if (!("personnelId" in person) || !person.personnelId) {
+        const digits = person.id.replace(/\D/g, "")
+        const n = Number(digits.slice(-6) || "0")
+        person.personnelId = String(10000 + (n % 899999))
+        touched = true
+      }
+    }
+  }
+  if (touched) await writeDb(db)
   return db
 }
 
@@ -65,6 +85,14 @@ function migrateTeamReport(report: TeamReport & { leaderId?: string }): boolean 
     report.groups = []
     touched = true
   }
+  if (!Array.isArray(report.highlightedIds)) {
+    report.highlightedIds = []
+    touched = true
+  }
+  if (!Array.isArray(report.contentSections)) {
+    report.contentSections = allReportContentSectionIds()
+    touched = true
+  }
   if (!report.updatedBy) {
     report.updatedBy = report.creator
     touched = true
@@ -77,7 +105,7 @@ function migrateTeamReport(report: TeamReport & { leaderId?: string }): boolean 
     report.hrbpEmailSent = false
     touched = true
   }
-  if (report.status !== "draft" && report.status !== "active") {
+  if (report.status !== "draft" && report.status !== "active" && report.status !== "archived") {
     report.status =
       report.reportAccess === "open" || report.hrbpReportAccess === "open" ? "active" : "draft"
     touched = true
@@ -172,6 +200,34 @@ export async function countTeamReportsForProcedure(id: string): Promise<number> 
   return db.teamReports.filter((r) => r.procedureId === id).length
 }
 
+/** Все участники всех процедур — для раздела «Поиск сотрудника». */
+export async function listEmployeesForSearch(): Promise<EmployeeSearchHit[]> {
+  const db = await readDb()
+  const rows: EmployeeSearchHit[] = []
+  for (const procedure of db.procedures) {
+    for (const person of procedure.participants) {
+      rows.push(toEmployeeSearchHit(person, procedure))
+    }
+  }
+  return rows
+}
+
+function toEmployeeSearchHit(person: Participant, procedure: Procedure): EmployeeSearchHit {
+  return {
+    id: person.id,
+    personnelId: person.personnelId,
+    fullName: person.fullName,
+    position: person.position,
+    sspUnit: person.sspUnit,
+    vspUnit: person.vspUnit,
+    externalLogin: person.externalLogin,
+    reportAccess: person.reportAccess,
+    procedureId: procedure.id,
+    procedureName: procedure.name,
+    procedureStatus: procedure.status,
+  }
+}
+
 // ---------- Командные отчёты ----------
 
 /** Процедуры, по которым можно строить командные отчёты (запущенные и завершённые). */
@@ -205,7 +261,10 @@ export async function listTeamReports(): Promise<TeamReportSummary[]> {
       leaderName: joinNames(r.leaderIds, peopleById),
       hrbpName: joinNames(r.hrbpIds, peopleById),
       memberCount: r.memberIds.length,
-      status: r.status === "active" ? "active" : "draft",
+      status:
+        r.status === "active" || r.status === "archived" || r.status === "draft"
+          ? r.status
+          : "draft",
       reportAccess: r.reportAccess,
       hrbpReportAccess: r.hrbpReportAccess ?? "closed",
       reportEmailSent: Boolean(r.reportEmailSent),

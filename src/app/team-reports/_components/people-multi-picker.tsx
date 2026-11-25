@@ -57,7 +57,9 @@ export function PeopleMultiPicker({
     const q = query.trim().toLowerCase()
     if (!q) return participants
     return participants.filter((p) =>
-      [p.fullName, p.position, p.externalLogin].some((v) => v.toLowerCase().includes(q)),
+      [p.fullName, p.position, p.sspUnit, p.externalLogin].some((v) =>
+        v.toLowerCase().includes(q),
+      ),
     )
   }, [participants, query])
 
@@ -120,7 +122,7 @@ export function PeopleMultiPicker({
             <Input
               autoFocus
               value={query}
-              placeholder="ФИО, должность или логин"
+              placeholder="ФИО, должность, подразделение или логин"
               className="pl-8"
               onChange={(e) => setQuery(e.target.value)}
             />
@@ -142,9 +144,14 @@ export function PeopleMultiPicker({
                 >
                   <span className="min-w-0 flex-1">
                     <span className="block truncate font-medium">{p.fullName}</span>
-                    <Badge variant="secondary" className="mt-1 max-w-full truncate font-normal">
-                      {p.position || "—"}
-                    </Badge>
+                    <span className="mt-1 flex flex-wrap gap-1">
+                      <Badge variant="secondary" className="max-w-full truncate font-normal">
+                        {p.position || "—"}
+                      </Badge>
+                      <Badge variant="secondary" className="max-w-full truncate font-normal">
+                        {p.sspUnit || "—"}
+                      </Badge>
+                    </span>
                   </span>
                   {checked && <CheckIcon className="size-4 shrink-0 text-primary" />}
                 </button>

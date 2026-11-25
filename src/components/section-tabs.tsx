@@ -1,10 +1,12 @@
 import Link from "next/link"
-import { UsersRoundIcon, UsersIcon } from "lucide-react"
+import { ChartColumnIcon, SearchIcon, UsersRoundIcon, UsersIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 const SECTIONS = [
   { key: "procedures", label: "Процедуры", href: "/procedures", icon: UsersRoundIcon },
   { key: "team-reports", label: "Командные отчёты", href: "/team-reports", icon: UsersIcon },
+  { key: "reporting", label: "Отчётность", href: "/reporting", icon: ChartColumnIcon },
+  { key: "employee-search", label: "Поиск сотрудника", href: "/employee-search", icon: SearchIcon },
 ] as const
 
 export type Section = (typeof SECTIONS)[number]["key"]

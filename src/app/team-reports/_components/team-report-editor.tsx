@@ -11,6 +11,7 @@ import { downloadParticipantsExcel } from "@/app/procedures/_components/excel"
 import { ReportDialog } from "@/app/procedures/_components/report-dialog"
 import { Cell, EmptyState, HeadCell } from "@/app/procedures/_components/table-bits"
 import { useParticipantView } from "@/app/procedures/_components/use-participant-view"
+import { ColumnFilter } from "@/components/column-filters"
 import { ParticipantAvatar } from "@/components/participant-avatar"
 import { TeamReportStatusBadge } from "@/components/status-badge"
 import { SimplePagination } from "@/components/simple-pagination"
@@ -28,11 +29,24 @@ import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/components/ui/table"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useWarnUnsaved } from "@/components/use-warn-unsaved"
 import { teamReportAccessMessage } from "@/lib/access-message"
 import { formatLastChange, pluralRu } from "@/lib/format"
+import {
+  REPORT_CONTENT_SECTIONS,
+  allReportContentSectionIds,
+  normalizeReportContentSections,
+} from "@/lib/report/definitions"
+import { groupDotStyle, groupSwatchClass } from "@/lib/report/group-colors"
 import type { Participant, ProcedureOption, ReportAccess, TeamReport, TeamReportInput, TeamReportStatus } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import {
@@ -50,6 +64,7 @@ import { PeopleMultiPicker } from "./people-multi-picker"
 type Person = Participant & { procedureId: string }
 
 const MEMBERS_PAGE_SIZE = 10
+const NO_GROUP = "__none__"
 
 function toInput(report: TeamReport | null): TeamReportInput {
   return {
@@ -59,6 +74,8 @@ function toInput(report: TeamReport | null): TeamReportInput {
     hrbpIds: report?.hrbpIds ?? [],
     memberIds: report?.memberIds ?? [],
     groups: report?.groups ?? [],
+    highlightedIds: report?.highlightedIds ?? [],
+    contentSections: normalizeReportContentSections(report?.contentSections),
   }
 }
 
@@ -78,6 +95,7 @@ export function TeamReportEditor({
   const [personalReport, setPersonalReport] = useState<Person | null>(null)
   const [confirmStatus, setConfirmStatus] = useState<TeamReportStatus | null>(null)
   const [membersPage, setMembersPage] = useState(1)
+  const [groupFilter, setGroupFilter] = useState<string[]>([])
   const [pending, startTransition] = useTransition()
   const excelInputRef = useRef<HTMLInputElement>(null)
 
@@ -110,6 +128,15 @@ export function TeamReportEditor({
     () => form.memberIds.map((id) => byId.get(id)).filter((p) => p !== undefined),
     [form.memberIds, byId],
   )
+  const groupByMemberId = useMemo(() => {
+    const map = new Map<string, { name: string; color?: string }>()
+    for (const g of form.groups) {
+      const name = g.name.trim()
+      if (!name) continue
+      for (const id of g.memberIds) map.set(id, { name, color: g.color })
+    }
+    return map
+  }, [form.groups])
   const procedureId =
     leaders[0]?.procedureId ?? members[0]?.procedureId ?? form.procedureId
   const procedurePeople = useMemo(
@@ -142,9 +169,28 @@ export function TeamReportEditor({
   )
 
   const view = useParticipantView(members)
-  const membersPageCount = Math.max(1, Math.ceil(view.rows.length / MEMBERS_PAGE_SIZE))
+  const groupFilterOptions = useMemo(() => {
+    const options = form.groups
+      .filter((g) => g.name.trim())
+      .map((g) => ({ value: g.id, label: g.name.trim() }))
+      .sort((a, b) => a.label.localeCompare(b.label, "ru"))
+    if (members.some((m) => !groupByMemberId.has(m.id))) {
+      options.push({ value: NO_GROUP, label: "Без группы" })
+    }
+    return options
+  }, [form.groups, members, groupByMemberId])
+  const memberRows = useMemo(() => {
+    if (groupFilter.length === 0) return view.rows
+    const selectedGroups = new Set(groupFilter)
+    return view.rows.filter((p) => {
+      const groupId = form.groups.find((g) => g.memberIds.includes(p.id))?.id ?? NO_GROUP
+      return selectedGroups.has(groupId)
+    })
+  }, [view.rows, groupFilter, form.groups])
+  const membersFiltered = view.isFiltered || groupFilter.length > 0
+  const membersPageCount = Math.max(1, Math.ceil(memberRows.length / MEMBERS_PAGE_SIZE))
   const currentMembersPage = Math.min(membersPage, membersPageCount)
-  const pageRows = view.rows.slice(
+  const pageRows = memberRows.slice(
     (currentMembersPage - 1) * MEMBERS_PAGE_SIZE,
     currentMembersPage * MEMBERS_PAGE_SIZE,
   )
@@ -152,7 +198,12 @@ export function TeamReportEditor({
   const allSelected = visibleIds.length > 0 && visibleIds.every((id) => selected.has(id))
   const someSelected = visibleIds.some((id) => selected.has(id))
 
-  const memberQuery = `${view.isFiltered}:${view.rows.length}`
+  function resetMemberFilters() {
+    view.reset()
+    setGroupFilter([])
+  }
+
+  const memberQuery = `${membersFiltered}:${memberRows.length}:${groupFilter.join(",")}`
   const [memberQuerySeen, setMemberQuerySeen] = useState(memberQuery)
   if (memberQuerySeen !== memberQuery) {
     setMemberQuerySeen(memberQuery)
@@ -163,12 +214,41 @@ export function TeamReportEditor({
     name: !form.name.trim() ? "Укажите название" : null,
     members: members.length === 0 ? "Добавьте в команду хотя бы одного участника" : null,
     procedureId: members.length > 0 && !procedureId ? "Не удалось определить процедуру команды" : null,
+    content:
+      form.contentSections.length === 0
+        ? "Выберите хотя бы один раздел содержания отчёта"
+        : null,
   }
   const hasErrors = Object.values(errors).some(Boolean)
   const show = (key: keyof typeof errors) => (submitted ? errors[key] : null)
 
+  const canEdit = !report || report.status !== "archived"
   const canEditMembers = !report || report.status === "draft"
+  const canEditContent = !report || report.status === "draft"
   const canOpenAccess = report?.status === "active"
+  const isArchived = report?.status === "archived"
+  const contentSelected = new Set(form.contentSections)
+  const allContentSelected = REPORT_CONTENT_SECTIONS.every((s) => contentSelected.has(s.id))
+  const someContentSelected = REPORT_CONTENT_SECTIONS.some((s) => contentSelected.has(s.id))
+
+  function toggleContentSection(id: string, checked: boolean | "indeterminate") {
+    if (!canEditContent) return
+    const on = checked === true
+    setForm((f) => {
+      const next = new Set(f.contentSections)
+      if (on) next.add(id)
+      else next.delete(id)
+      return {
+        ...f,
+        contentSections: REPORT_CONTENT_SECTIONS.map((s) => s.id).filter((sid) => next.has(sid)),
+      }
+    })
+  }
+
+  function toggleAllContentSections(checked: boolean | "indeterminate") {
+    if (!canEditContent) return
+    set("contentSections", checked === true ? allReportContentSectionIds() : [])
+  }
 
   function set<K extends keyof TeamReportInput>(key: K, value: TeamReportInput[K]) {
     setForm((f) => ({ ...f, [key]: value }))
@@ -181,41 +261,37 @@ export function TeamReportEditor({
     }
     const first = byId.get(ids[0])
     if (!first) return
+    // Руководители — из одной процедуры; участники команды могут быть из нескольких.
     const nextIds = ids.filter((id) => byId.get(id)?.procedureId === first.procedureId)
     const nextSet = new Set(nextIds)
     if (!canEditMembers) {
-      const changesTeam =
-        (form.procedureId !== "" && first.procedureId !== form.procedureId) ||
-        nextIds.some((id) => form.memberIds.includes(id))
-      if (changesTeam) {
+      if (nextIds.some((id) => form.memberIds.includes(id))) {
         toast.error("Добавлять и убирать сотрудников можно только в статусе «Черновик»")
         return
       }
       setForm((f) => ({
         ...f,
         leaderIds: nextIds,
+        procedureId: first.procedureId,
         hrbpIds: f.hrbpIds.filter((h) => !nextSet.has(h)),
       }))
       return
     }
     setForm((f) => {
-      const sameProcedure = f.procedureId === first.procedureId
-      const memberIds = sameProcedure ? f.memberIds.filter((m) => !nextSet.has(m)) : []
+      const memberIds = f.memberIds.filter((m) => !nextSet.has(m))
+      const memberSet = new Set(memberIds)
       return {
         ...f,
         leaderIds: nextIds,
         procedureId: first.procedureId,
         memberIds,
-        // Сотрудники ДРП не зависят от процедуры руководителя — только убираем пересечение с ними.
         hrbpIds: f.hrbpIds.filter((h) => !nextSet.has(h)),
-        groups: sameProcedure
-          ? f.groups
-              .map((g) => ({ ...g, memberIds: g.memberIds.filter((id) => memberIds.includes(id)) }))
-              .filter((g) => g.memberIds.length > 0)
-          : [],
+        groups: f.groups
+          .map((g) => ({ ...g, memberIds: g.memberIds.filter((id) => memberIds.includes(id)) }))
+          .filter((g) => g.memberIds.length > 0),
+        highlightedIds: f.highlightedIds.filter((id) => memberSet.has(id) || nextSet.has(id)),
       }
     })
-    if (form.procedureId && form.procedureId !== first.procedureId) setSelected(new Set())
   }
 
   function removeSelected() {
@@ -228,12 +304,40 @@ export function TeamReportEditor({
       groups: f.groups
         .map((g) => ({ ...g, memberIds: g.memberIds.filter((id) => !selected.has(id)) }))
         .filter((g) => g.memberIds.length > 0),
+      highlightedIds: f.highlightedIds.filter((id) => !selected.has(id)),
     }))
     setSelected(new Set())
     toast.success(
       `Из команды ${pluralRu(n, "убран", "убраны", "убраны")} ${n} ${pluralRu(n, "участник", "участника", "участников")}. Нажмите «Сохранить», чтобы применить изменения.`,
     )
   }
+
+  /** Назначает группу одному или нескольким участникам (пустой groupId — без группы). */
+  function assignMembersToGroup(memberIds: string[], groupId: string | null) {
+    if (!canEditMembers || memberIds.length === 0) return
+    const ids = new Set(memberIds)
+    setForm((f) => ({
+      ...f,
+      groups: f.groups.map((g) => {
+        const without = g.memberIds.filter((id) => !ids.has(id))
+        if (groupId && g.id === groupId) {
+          return { ...g, memberIds: [...new Set([...without, ...memberIds])] }
+        }
+        return { ...g, memberIds: without }
+      }),
+    }))
+  }
+
+  const groupSelectItems = useMemo(
+    () => [
+      { value: NO_GROUP, label: "Без группы" },
+      ...form.groups.map((g) => ({
+        value: g.id,
+        label: g.name.trim() || "Без названия",
+      })),
+    ],
+    [form.groups],
+  )
 
   /** Загрузка Excel: сопоставление по внешнему логину с участниками запущенных процедур. */
   function importExcel(file: File) {
@@ -261,15 +365,10 @@ export function TeamReportEditor({
 
       setForm((current) => ({
         ...current,
-        ...formAfterMemberImport(
-          current,
-          procedures,
-          plan.accepted.map((person) => person.id),
-          plan.targetProcedureId,
-        ),
+        ...formAfterMemberImport(current, plan.accepted),
       }))
 
-      const skipped = plan.unknown + plan.duplicates + plan.skippedOtherProc
+      const skipped = plan.unknown + plan.duplicates
       toast.success(
         `Загружено: ${plan.accepted.length}` +
           (skipped ? `, пропущено: ${skipped}` : "") +
@@ -307,7 +406,15 @@ export function TeamReportEditor({
       const res = await setTeamReportStatusAction(report.id, next)
       setConfirmStatus(null)
       if (!res.ok) return void toast.error(res.error)
-      toast.success(next === "active" ? "Отчёт активирован" : "Отчёт возвращён в черновик")
+      toast.success(
+        next === "archived"
+          ? "Отчёт отправлен в архив"
+          : next === "draft"
+            ? "Отчёт возвращён в черновик"
+            : report.status === "archived"
+              ? "Отчёт восстановлен"
+              : "Отчёт активирован",
+      )
       router.refresh()
     })
   }
@@ -347,19 +454,35 @@ export function TeamReportEditor({
           {report && <TeamReportStatusBadge status={report.status} />}
           {report && (
             <div className="ml-auto flex flex-wrap items-center gap-2">
-              {report.status === "draft" ? (
+              {report.status === "draft" && (
                 <Button size="sm" disabled={pending || members.length === 0} onClick={() => setConfirmStatus("active")}>
                   Активировать
                 </Button>
-              ) : (
-                <Button size="sm" variant="outline" disabled={pending} onClick={() => setConfirmStatus("draft")}>
-                  Вернуть в черновик
+              )}
+              {report.status === "active" && (
+                <>
+                  <Button size="sm" variant="outline" disabled={pending} onClick={() => setConfirmStatus("draft")}>
+                    Вернуть в черновик
+                  </Button>
+                  <Button size="sm" variant="secondary" disabled={pending} onClick={() => setConfirmStatus("archived")}>
+                    В архив
+                  </Button>
+                </>
+              )}
+              {report.status === "archived" && (
+                <Button size="sm" disabled={pending} onClick={() => setConfirmStatus("active")}>
+                  Восстановить
                 </Button>
               )}
               <Button
                 variant="secondary"
                 render={<Link href={`/team-reports/${report.id}/report`} />}
                 nativeButton={false}
+                onClick={(e) => {
+                  if (!dirty) return
+                  e.preventDefault()
+                  toast.error("Сначала сохраните изменения")
+                }}
               >
                 <FileTextIcon /> Командный отчёт
               </Button>
@@ -367,12 +490,19 @@ export function TeamReportEditor({
           )}
         </div>
         <div className="grid gap-5 p-4">
+          {isArchived && (
+            <p className="text-xs text-muted-foreground">
+              Отчёт в архиве: доступ руководителю и сотруднику ДРП закрыт. Администратор может
+              просматривать данные, редактирование недоступно.
+            </p>
+          )}
           <Field id="name" label="Название" error={show("name")} required>
             <Input
               id="name"
               className="w-1/2"
               value={form.name}
               placeholder="Например, команда отдела аналитики"
+              disabled={!canEdit}
               aria-invalid={!!show("name") || undefined}
               onChange={(e) => set("name", e.target.value)}
             />
@@ -394,7 +524,7 @@ export function TeamReportEditor({
                   id="leader"
                   participants={leaderCandidates}
                   value={form.leaderIds}
-                  disabled={people.length === 0}
+                  disabled={!canEdit || people.length === 0}
                   placeholder="Выберите руководителей"
                   listLabel="Руководители"
                   removeRoleLabel="руководителя"
@@ -428,7 +558,7 @@ export function TeamReportEditor({
                   id="hrbp"
                   participants={hrbpCandidates}
                   value={form.hrbpIds}
-                  disabled={people.length === 0}
+                  disabled={!canEdit || people.length === 0}
                   placeholder="Выберите сотрудников ДРП"
                   listLabel="Сотрудники ДРП"
                   removeRoleLabel="сотрудника ДРП"
@@ -458,13 +588,67 @@ export function TeamReportEditor({
 
       <section className="rounded-xl bg-background shadow-xs">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
+          <h2 className="text-base font-semibold">Содержание командного отчёта</h2>
+        </div>
+        <div className="flex flex-col gap-3 p-4">
+          {canEditContent ? (
+            <p className="text-xs text-muted-foreground">
+              Отметьте разделы, которые войдут в командный отчёт. После «Сохранить» они появятся на
+              странице отчёта.
+            </p>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              Содержание отчёта можно менять только в статусе «Черновик».
+            </p>
+          )}
+          {show("content") && <p className="text-xs text-destructive">{show("content")}</p>}
+          <label className="inline-flex w-fit items-center gap-2 text-sm font-medium">
+            <Checkbox
+              checked={allContentSelected}
+              indeterminate={!allContentSelected && someContentSelected}
+              disabled={!canEditContent}
+              onCheckedChange={toggleAllContentSections}
+              aria-label="Выбрать все разделы"
+            />
+            Выбрать все
+          </label>
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {REPORT_CONTENT_SECTIONS.map((section) => (
+              <label
+                key={section.id}
+                className={cn(
+                  "flex items-start gap-2 rounded-md px-2 py-1.5 text-sm",
+                  canEditContent ? "cursor-pointer hover:bg-muted" : "cursor-default opacity-80",
+                )}
+              >
+                <Checkbox
+                  className="mt-0.5"
+                  checked={contentSelected.has(section.id)}
+                  disabled={!canEditContent}
+                  onCheckedChange={(checked) => toggleContentSection(section.id, checked)}
+                />
+                <span>{section.title}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="rounded-xl bg-background shadow-xs">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
           <h2 className="text-base font-semibold">Список сотрудников</h2>
         </div>
         <div className="flex flex-col gap-3 p-4">
-          {!canEditMembers && (
+          {isArchived ? (
             <p className="text-xs text-muted-foreground">
-              Состав команды можно менять только в статусе «Черновик».
+              Архивный отчёт доступен только для просмотра.
             </p>
+          ) : (
+            !canEditMembers && (
+              <p className="text-xs text-muted-foreground">
+                Состав команды можно менять только в статусе «Черновик».
+              </p>
+            )
           )}
           <div className="flex flex-wrap items-center gap-2">
             <Button disabled={!canEditMembers || memberProcedures.length === 0} onClick={() => setAddOpen(true)}>
@@ -473,6 +657,46 @@ export function TeamReportEditor({
             <Button variant="destructive" disabled={!canEditMembers || selected.size === 0} onClick={removeSelected}>
               <UserMinusIcon /> Удалить сотрудников{selected.size > 0 && ` (${selected.size})`}
             </Button>
+            {canEditMembers && form.groups.length > 0 && selected.size > 0 && (
+              <Select
+                key={selected.size}
+                items={groupSelectItems}
+                onValueChange={(v) => {
+                  if (!v) return
+                  const n = selected.size
+                  assignMembersToGroup([...selected], v === NO_GROUP ? null : v)
+                  toast.success(
+                    `Группа обновлена для ${n} ${pluralRu(n, "сотрудника", "сотрудников", "сотрудников")}. Нажмите «Сохранить».`,
+                  )
+                }}
+              >
+                <SelectTrigger className="h-8 w-52 text-xs">
+                  <SelectValue placeholder="Группа для выбранных" />
+                </SelectTrigger>
+                <SelectContent>
+                  {groupSelectItems.map((item) => {
+                    const opt = form.groups.find((g) => g.id === item.value)
+                    return (
+                      <SelectItem key={item.value} value={item.value}>
+                        <span className="inline-flex items-center gap-1.5">
+                          {opt && (
+                            <span
+                              className={cn(
+                                "size-2.5 shrink-0 rounded-full",
+                                groupSwatchClass(opt.color),
+                              )}
+                              style={groupDotStyle(opt.color)}
+                              aria-hidden
+                            />
+                          )}
+                          {item.label}
+                        </span>
+                      </SelectItem>
+                    )
+                  })}
+                </SelectContent>
+              </Select>
+            )}
             <div className="ml-auto flex flex-wrap items-center gap-2">
               <Button
                 variant="secondary"
@@ -513,7 +737,7 @@ export function TeamReportEditor({
           )}
 
           <div className="max-h-[60vh] overflow-auto rounded-lg border">
-            <Table className="w-full min-w-[960px] table-fixed text-xs">
+            <Table className="w-full min-w-[1140px] table-fixed text-xs">
               <TableHeader className="sticky top-0 z-10">
                 <TableRow className="hover:bg-transparent">
                   <HeadCell
@@ -537,47 +761,69 @@ export function TeamReportEditor({
                   />
                   <HeadCell label="" className="w-12" />
                   <HeadCell
+                    label="ID"
+                    className="w-[7%]"
+                    view={view}
+                    sortKey="personnelId"
+                    searchKey="personnelId"
+                  />
+                  <HeadCell
                     label="ФИО"
-                    className="w-[18%]"
+                    className="w-[14%]"
                     view={view}
                     sortKey="fullName"
                     searchKey="fullName"
                   />
                   <HeadCell
                     label="Должность"
-                    className="w-[16%]"
+                    className="w-[13%]"
                     view={view}
                     filterKey="position"
                     participants={members}
                   />
                   <HeadCell
                     label="Подразделение ССП"
-                    className="w-[16%]"
+                    className="w-[13%]"
                     view={view}
                     filterKey="sspUnit"
                     participants={members}
                   />
                   <HeadCell
                     label="Подразделение ВСП"
-                    className="w-[16%]"
+                    className="w-[13%]"
                     view={view}
                     filterKey="vspUnit"
                     participants={members}
                   />
-                  <HeadCell label="Процедура" className="w-[12%]" />
+                  <HeadCell label="Процедура" className="w-[11%]" />
+                  <HeadCell
+                    label={
+                      <span className="inline-flex items-center gap-1">
+                        Группа
+                        <ColumnFilter
+                          label="Группа"
+                          options={groupFilterOptions}
+                          selected={groupFilter}
+                          onChange={setGroupFilter}
+                        />
+                      </span>
+                    }
+                    className="w-[11%]"
+                  />
                   <HeadCell label="Персональный отчёт" className="w-28 text-center" />
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {view.rows.length === 0 && (
+                {memberRows.length === 0 && (
                   <TableRow className="hover:bg-transparent">
-                    <TableCell colSpan={8}>
-                      <EmptyState filtered={view.isFiltered} onReset={view.reset} />
+                    <TableCell colSpan={10}>
+                      <EmptyState filtered={membersFiltered} onReset={resetMemberFilters} />
                     </TableCell>
                   </TableRow>
                 )}
                 {pageRows.map((p) => {
                   const hasReport = p.reportAccess !== null
+                  const group = groupByMemberId.get(p.id)
                   return (
                     <TableRow key={p.id} data-state={selected.has(p.id) ? "selected" : undefined}>
                       <TableCell className="w-10">
@@ -596,12 +842,84 @@ export function TeamReportEditor({
                       <TableCell className="w-12">
                         <ParticipantAvatar fullName={p.fullName} />
                       </TableCell>
+                      <TableCell className="tabular-nums whitespace-nowrap">
+                        <Cell>{p.personnelId || "—"}</Cell>
+                      </TableCell>
                       <TableCell className="whitespace-normal">{p.fullName}</TableCell>
                       <TableCell className="whitespace-normal"><Cell>{p.position}</Cell></TableCell>
                       <TableCell className="whitespace-normal"><Cell>{p.sspUnit}</Cell></TableCell>
                       <TableCell className="whitespace-normal"><Cell>{p.vspUnit}</Cell></TableCell>
                       <TableCell className="whitespace-normal">
                         <Cell>{procedureNameById.get(p.procedureId) ?? "—"}</Cell>
+                      </TableCell>
+                      <TableCell className="whitespace-normal">
+                        {canEditMembers && form.groups.length > 0 ? (
+                          <Select
+                            items={groupSelectItems}
+                            value={
+                              form.groups.find((g) => g.memberIds.includes(p.id))?.id ?? NO_GROUP
+                            }
+                            onValueChange={(v) => {
+                              if (!v) return
+                              assignMembersToGroup([p.id], v === NO_GROUP ? null : v)
+                            }}
+                          >
+                            <SelectTrigger
+                              className="h-7 w-full min-w-0 text-xs"
+                              aria-label={`Группа: ${p.fullName}`}
+                            >
+                              <span className="flex min-w-0 flex-1 items-center gap-1.5">
+                                {group && (
+                                  <span
+                                    className={cn(
+                                      "size-2.5 shrink-0 rounded-full",
+                                      groupSwatchClass(group.color),
+                                    )}
+                                    style={groupDotStyle(group.color)}
+                                    aria-hidden
+                                  />
+                                )}
+                                <SelectValue />
+                              </span>
+                            </SelectTrigger>
+                            <SelectContent>
+                              {groupSelectItems.map((item) => {
+                                const opt = form.groups.find((g) => g.id === item.value)
+                                return (
+                                  <SelectItem key={item.value} value={item.value}>
+                                    <span className="inline-flex items-center gap-1.5">
+                                      {opt && (
+                                        <span
+                                          className={cn(
+                                            "size-2.5 shrink-0 rounded-full",
+                                            groupSwatchClass(opt.color),
+                                          )}
+                                          style={groupDotStyle(opt.color)}
+                                          aria-hidden
+                                        />
+                                      )}
+                                      {item.label}
+                                    </span>
+                                  </SelectItem>
+                                )
+                              })}
+                            </SelectContent>
+                          </Select>
+                        ) : group ? (
+                          <span className="inline-flex max-w-full items-center gap-1.5">
+                            <span
+                              className={cn(
+                                "size-2.5 shrink-0 rounded-full",
+                                groupSwatchClass(group.color),
+                              )}
+                              style={groupDotStyle(group.color)}
+                              aria-hidden
+                            />
+                            <span className="truncate">{group.name}</span>
+                          </span>
+                        ) : (
+                          <Cell>{form.groups.length === 0 ? "Нет групп" : "—"}</Cell>
+                        )}
                       </TableCell>
                       <TableCell className="w-28 text-center">
                         <Button
@@ -621,9 +939,9 @@ export function TeamReportEditor({
               </TableBody>
             </Table>
           </div>
-          {view.rows.length > 0 && (
+          {memberRows.length > 0 && (
             <SimplePagination
-              total={view.rows.length}
+              total={memberRows.length}
               page={currentMembersPage}
               pageCount={membersPageCount}
               onPageChange={setMembersPage}
@@ -632,10 +950,12 @@ export function TeamReportEditor({
           {show("members") && <p className="text-xs text-destructive">{show("members")}</p>}
         </div>
         <div className="flex flex-wrap items-center gap-2 border-t px-4 py-3">
-          <Button size="lg" className="px-4" disabled={pending} onClick={save}>
+          <Button size="lg" className="px-4" disabled={pending || !canEdit} onClick={save}>
             Сохранить
           </Button>
-          {dirty && <span className="text-xs text-muted-foreground">Есть несохранённые изменения</span>}
+          {dirty && canEdit && (
+            <span className="text-xs text-muted-foreground">Есть несохранённые изменения</span>
+          )}
         </div>
       </section>
 
@@ -644,28 +964,50 @@ export function TeamReportEditor({
         onOpenChange={setAddOpen}
         procedures={memberProcedures}
         initialProcedureId={procedureId || undefined}
-        onAdd={({ procedureId: fromProcedureId, memberIds: ids, groups: newGroups }) => {
+        existingGroups={form.groups}
+        onAdd={({ memberIds: ids, groups: newGroups, highlightedIds: newHighlighted }) => {
           if (!canEditMembers) return
-          const pool = procedures.find((p) => p.id === fromProcedureId)
-          const inProcedure = new Set(pool?.participants.map((p) => p.id) ?? [])
+          const addedSet = new Set(ids)
           setForm((f) => {
-            const keptMembers = f.memberIds.filter((id) => inProcedure.has(id) && !ids.includes(id))
-            const memberIds = [...keptMembers, ...ids]
-            const keptGroups =
-              f.procedureId === fromProcedureId
-                ? f.groups
-                    .map((g) => ({
-                      ...g,
-                      memberIds: g.memberIds.filter((id) => memberIds.includes(id)),
-                    }))
-                    .filter((g) => g.memberIds.length > 0)
-                : []
+            const memberIds = [...f.memberIds.filter((id) => !addedSet.has(id)), ...ids]
+            const memberSet = new Set(memberIds)
+            const primaryProcedureId =
+              f.procedureId ||
+              byId.get(f.leaderIds[0] ?? "")?.procedureId ||
+              byId.get(ids[0] ?? "")?.procedureId ||
+              ""
+            const merged = new Map(
+              f.groups
+                .map((g) => ({
+                  ...g,
+                  memberIds: g.memberIds.filter((id) => memberSet.has(id)),
+                }))
+                .filter((g) => g.memberIds.length > 0)
+                .map((g) => [g.id, g] as const),
+            )
+            for (const g of newGroups) {
+              const prev = merged.get(g.id)
+              if (prev) {
+                merged.set(g.id, {
+                  ...prev,
+                  name: g.name || prev.name,
+                  color: g.color ?? prev.color,
+                  memberIds: [...new Set([...prev.memberIds, ...g.memberIds])],
+                })
+              } else if (g.memberIds.length > 0) {
+                merged.set(g.id, g)
+              }
+            }
             return {
               ...f,
-              procedureId: fromProcedureId,
+              procedureId: primaryProcedureId,
               memberIds,
-              leaderIds: f.leaderIds.filter((id) => inProcedure.has(id)),
-              groups: [...keptGroups, ...newGroups],
+              leaderIds: f.leaderIds.filter((id) => !addedSet.has(id)),
+              groups: [...merged.values()],
+              highlightedIds: [
+                ...f.highlightedIds.filter((id) => memberSet.has(id) && !addedSet.has(id)),
+                ...newHighlighted.filter((id) => memberSet.has(id)),
+              ],
             }
           })
           setSelected(new Set())
@@ -691,12 +1033,22 @@ export function TeamReportEditor({
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {confirmStatus === "active" ? "Активировать отчёт?" : "Вернуть отчёт в черновик?"}
+              {confirmStatus === "archived"
+                ? "Отправить отчёт в архив?"
+                : confirmStatus === "draft"
+                  ? "Вернуть отчёт в черновик?"
+                  : report?.status === "archived"
+                    ? "Восстановить отчёт?"
+                    : "Активировать отчёт?"}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              {confirmStatus === "active"
-                ? "После активации состав команды нельзя будет менять. Отчёт можно будет показать руководителю и сотруднику ДРП."
-                : "Состав команды снова можно будет менять. Доступ руководителя и сотрудника ДРП будет закрыт."}
+              {confirmStatus === "archived"
+                ? "Доступ руководителя и сотрудника ДРП будет закрыт. Администратор сможет просматривать отчёт, но не редактировать."
+                : confirmStatus === "draft"
+                  ? "Состав команды снова можно будет менять. Доступ руководителя и сотрудника ДРП будет закрыт."
+                  : report?.status === "archived"
+                    ? "Отчёт снова станет активным. При необходимости откройте доступ руководителю и сотруднику ДРП."
+                    : "После активации состав команды нельзя будет менять. Отчёт можно будет показать руководителю и сотруднику ДРП."}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -705,7 +1057,13 @@ export function TeamReportEditor({
               disabled={pending || !confirmStatus}
               onClick={() => confirmStatus && changeStatus(confirmStatus)}
             >
-              {confirmStatus === "active" ? "Активировать" : "Вернуть в черновик"}
+              {confirmStatus === "archived"
+                ? "В архив"
+                : confirmStatus === "draft"
+                  ? "Вернуть в черновик"
+                  : report?.status === "archived"
+                    ? "Восстановить"
+                    : "Активировать"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

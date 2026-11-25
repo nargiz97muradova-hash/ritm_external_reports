@@ -5,10 +5,16 @@ import { ArrowLeftIcon, FlaskConicalIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { formatDate } from "@/lib/format"
 import { buildTeamReportData } from "@/lib/report/build"
-import { SCALE_SECTIONS, TRAFFIC_TEXT } from "@/lib/report/definitions"
-import { groupDotClass } from "@/lib/report/group-colors"
+import {
+  REPORT_CONTENT_SECTIONS,
+  SCALE_SECTIONS,
+  TRAFFIC_TEXT,
+  normalizeReportContentSections,
+  type ReportContentSectionId,
+} from "@/lib/report/definitions"
+import { groupDotClass, groupDotStyle } from "@/lib/report/group-colors"
 import type { TeamReportData } from "@/lib/report/types"
-import { getProcedure, getTeamReport } from "@/lib/store"
+import { getProcedure, getTeamReport, listLaunchedProcedures } from "@/lib/store"
 import { cn } from "@/lib/utils"
 import { CompetencyTraffic } from "./_components/competency-traffic"
 import { Heatmap } from "./_components/heatmap"
@@ -32,9 +38,19 @@ async function ReportData({ params }: Pick<PageProps<"/team-reports/[id]/report"
   const { id } = await params
   const report = await getTeamReport(id)
   if (!report) notFound()
-  const procedure = await getProcedure(report.procedureId)
+  const [procedure, launched] = await Promise.all([
+    getProcedure(report.procedureId),
+    listLaunchedProcedures(),
+  ])
   if (!procedure) notFound()
-  return <Report reportId={report.id} data={buildTeamReportData(report, procedure)} />
+  const extras = launched.filter((p) => p.id !== procedure.id)
+  return (
+    <Report
+      reportId={report.id}
+      data={buildTeamReportData(report, procedure, extras)}
+      contentSections={normalizeReportContentSections(report.contentSections)}
+    />
+  )
 }
 
 function formatDateTime(iso: string) {
@@ -43,21 +59,18 @@ function formatDateTime(iso: string) {
   return `${formatDate(iso)} ${time}`
 }
 
-const TOC = [
-  { id: "participants", title: "Состав участников" },
-  { id: "groups", title: "Группы участников" },
-  { id: "integral-all", title: "Интегральный отчёт: все участники" },
-  { id: "integral-team", title: "Интегральный отчёт: команда" },
-  { id: "traffic", title: "Разметка компетенций" },
-  { id: "roles", title: "Распределение ролей" },
-  { id: "role-descriptions", title: "Расшифровка профилей" },
-  { id: "potential", title: "Матрица потенциала" },
-  ...SCALE_SECTIONS.map((s) => ({ id: s.key, title: s.title })),
-  ...SCALE_SECTIONS.map((s) => ({ id: `heat-${s.key}`, title: `Тепловая карта: ${s.title.toLowerCase()}` })),
-  { id: "learning", title: "Стили обучения" },
-]
-
-function Report({ reportId, data }: { reportId: string; data: TeamReportData }) {
+function Report({
+  reportId,
+  data,
+  contentSections,
+}: {
+  reportId: string
+  data: TeamReportData
+  contentSections: ReportContentSectionId[]
+}) {
+  const enabled = new Set<string>(contentSections)
+  const show = (id: string) => enabled.has(id)
+  const toc = REPORT_CONTENT_SECTIONS.filter((item) => enabled.has(item.id))
   const groupIds = data.groups.map((g) => g.id)
   const nonLeaders = data.participants.filter((p) => p.group !== "leader")
   const groupCounts = Object.fromEntries(
@@ -100,7 +113,7 @@ function Report({ reportId, data }: { reportId: string; data: TeamReportData }) 
         >
           <p className="mb-2 px-2 text-xs font-semibold">Содержание</p>
           <ol className="grid gap-0.5 text-xs xl:max-h-[calc(100vh-8rem)] xl:overflow-y-auto">
-            {TOC.map((item, i) => (
+            {toc.map((item, i) => (
               <li key={item.id}>
                 <a href={`#${item.id}`} className="flex gap-2 rounded-md px-2 py-1 text-muted-foreground hover:bg-muted hover:text-foreground">
                   <span className="w-4 text-right tabular-nums">{i + 1}</span>
@@ -112,104 +125,128 @@ function Report({ reportId, data }: { reportId: string; data: TeamReportData }) 
         </nav>
 
         <div className="flex min-w-0 flex-col gap-3">
-          <ReportSection id="participants" title="Состав участников исследования">
-            <GroupLegend groups={data.groups} />
-            <ol className="mt-3 grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2 lg:grid-cols-3">
-              {data.participants.map((p) => (
-                <li key={p.id} className="flex items-center gap-2 rounded-md px-2 py-1.5 odd:bg-muted/40">
-                  <Chip participant={p} groupIds={groupIds} />
-                  <span className="min-w-0">
-                    <span className="block truncate">{p.fullName}</span>
-                    <span className="block truncate text-xs text-muted-foreground">
-                      {p.group === "leader"
-                        ? "Руководитель"
-                        : data.groups.find((g) => g.id === p.group)?.name || p.position || "—"}
+          {show("participants") && (
+            <ReportSection id="participants" title="Состав участников исследования">
+              <GroupLegend groups={data.groups} />
+              <ol className="mt-3 grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2 lg:grid-cols-3">
+                {data.participants.map((p) => (
+                  <li key={p.id} className="flex items-center gap-2 rounded-md px-2 py-1.5 odd:bg-muted/40">
+                    <Chip participant={p} groupIds={groupIds} />
+                    <span className="min-w-0">
+                      <span className="block truncate">{p.fullName}</span>
+                      <span className="block truncate text-xs text-muted-foreground">
+                        {p.group === "leader"
+                          ? "Руководитель"
+                          : data.groups.find((g) => g.id === p.group)?.name || p.position || "—"}
+                      </span>
                     </span>
-                  </span>
-                </li>
-              ))}
-            </ol>
-          </ReportSection>
-
-          <ReportSection id="groups" title="Группы участников">
-            <p className="mb-3 text-xs text-muted-foreground">
-              Группы нужны, чтобы сравнивать профили в тепловых картах и интегральных отчётах. Если
-              группировка не задана, все участники входят в одну команду.
-            </p>
-            <table className="w-full max-w-xl text-sm">
-              <thead className="text-left text-xs text-muted-foreground">
-                <tr>
-                  <th className="w-10 pb-2 font-medium">№</th>
-                  <th className="pb-2 font-medium">Название группы</th>
-                  <th className="pb-2 font-medium">Цвет</th>
-                  <th className="pb-2 text-right font-medium">Участников</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.groups.map((g, i) => (
-                  <tr key={g.id} className="border-t">
-                    <td className="py-2 text-muted-foreground">{i + 1}</td>
-                    <td className="py-2">{g.name}</td>
-                    <td className="py-2">
-                      <span className={cn("inline-block size-4 rounded-full", groupDotClass(g.id, groupIds))} />
-                    </td>
-                    <td className="py-2 text-right tabular-nums">{groupCounts[g.id] ?? 0}</td>
-                  </tr>
+                  </li>
                 ))}
-              </tbody>
-            </table>
-          </ReportSection>
+              </ol>
+            </ReportSection>
+          )}
 
-          <ReportSection id="integral-all" title="Интегральный отчёт: все участники" description="«Компетенции Zetic» (стандартные индикаторы)">
-            <IntegralMatrix points={data.integralAll} />
-          </ReportSection>
+          {show("groups") && (
+            <ReportSection id="groups" title="Группы участников">
+              <p className="mb-3 text-xs text-muted-foreground">
+                Группы нужны, чтобы сравнивать профили в тепловых картах и интегральных отчётах. Если
+                группировка не задана, все участники входят в одну команду.
+              </p>
+              <table className="w-full max-w-xl text-sm">
+                <thead className="text-left text-xs text-muted-foreground">
+                  <tr>
+                    <th className="w-10 pb-2 font-medium">№</th>
+                    <th className="pb-2 font-medium">Название группы</th>
+                    <th className="pb-2 font-medium">Цвет</th>
+                    <th className="pb-2 text-right font-medium">Участников</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.groups.map((g, i) => (
+                    <tr key={g.id} className="border-t">
+                      <td className="py-2 text-muted-foreground">{i + 1}</td>
+                      <td className="py-2">{g.name}</td>
+                      <td className="py-2">
+                        <span
+                          className={cn(
+                            "inline-block size-4 rounded-full",
+                            groupDotClass(g.id, groupIds, g.color),
+                          )}
+                          style={groupDotStyle(g.color)}
+                        />
+                      </td>
+                      <td className="py-2 text-right tabular-nums">{groupCounts[g.id] ?? 0}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </ReportSection>
+          )}
 
-          <ReportSection
-            id="integral-team"
-            title={`Интегральный отчёт: группа «${data.groups[0].name}»`}
-            description="«Компетенции Zetic» (стандартные индикаторы), без руководителя"
-          >
-            {nonLeaders.length > 0 ? (
-              <IntegralMatrix points={data.integralTeam} />
-            ) : (
-              <p className="text-sm text-muted-foreground">В команде нет участников.</p>
-            )}
-          </ReportSection>
+          {show("integral-all") && (
+            <ReportSection id="integral-all" title="Интегральный отчёт: все участники" description="«Компетенции Zetic» (стандартные индикаторы)">
+              <IntegralMatrix points={data.integralAll} />
+            </ReportSection>
+          )}
 
-          <ReportSection id="traffic" title="Разметка «Компетенции Zetic»" description={TRAFFIC_TEXT}>
-            <CompetencyTraffic participants={data.participants} averages={data.competencyAverages} />
-          </ReportSection>
+          {show("integral-team") && (
+            <ReportSection
+              id="integral-team"
+              title={`Интегральный отчёт: группа «${data.groups[0].name}»`}
+              description="«Компетенции Zetic» (стандартные индикаторы), без руководителя"
+            >
+              {nonLeaders.length > 0 ? (
+                <IntegralMatrix points={data.integralTeam} />
+              ) : (
+                <p className="text-sm text-muted-foreground">В команде нет участников.</p>
+              )}
+            </ReportSection>
+          )}
 
-          <ReportSection id="roles" title="Командный профиль: распределение ролей в группе">
-            <GroupLegend groups={data.groups} />
-            <div className="mt-3">
-              <RolesGrid participants={data.participants} />
-            </div>
-          </ReportSection>
+          {show("traffic") && (
+            <ReportSection id="traffic" title="Разметка «Компетенции Zetic»" description={TRAFFIC_TEXT}>
+              <CompetencyTraffic participants={data.participants} averages={data.competencyAverages} />
+            </ReportSection>
+          )}
 
-          <ReportSection id="role-descriptions" title="Расшифровка профилей">
-            <RoleDescriptions />
-          </ReportSection>
+          {show("roles") && (
+            <ReportSection id="roles" title="Командный профиль: распределение ролей в группе">
+              <GroupLegend groups={data.groups} />
+              <div className="mt-3">
+                <RolesGrid participants={data.participants} />
+              </div>
+            </ReportSection>
+          )}
 
-          <ReportSection id="potential" title="Матрица потенциала">
-            <PotentialMatrix participants={data.participants} />
-          </ReportSection>
+          {show("role-descriptions") && (
+            <ReportSection id="role-descriptions" title="Расшифровка профилей">
+              <RoleDescriptions />
+            </ReportSection>
+          )}
 
-          {SCALE_SECTIONS.map((section) => (
+          {show("potential") && (
+            <ReportSection id="potential" title="Матрица потенциала">
+              <PotentialMatrix participants={data.participants} />
+            </ReportSection>
+          )}
+
+          {SCALE_SECTIONS.filter((section) => show(section.key)).map((section) => (
             <ReportSection key={section.key} id={section.key} title={section.title} description={section.description}>
               <ScaleStrips section={section} participants={data.participants} />
             </ReportSection>
           ))}
 
-          {SCALE_SECTIONS.map((section) => (
+          {SCALE_SECTIONS.filter((section) => show(`heat-${section.key}`)).map((section) => (
             <ReportSection key={section.key} id={`heat-${section.key}`} title={`Тепловая карта | ${section.title}`}>
               <Heatmap section={section} groups={data.groups} heat={data.heat} />
             </ReportSection>
           ))}
 
-          <ReportSection id="learning" title="Командный профиль: стили обучения">
-            <LearningStyles participants={data.participants} />
-          </ReportSection>
+          {show("learning") && (
+            <ReportSection id="learning" title="Командный профиль: стили обучения">
+              <LearningStyles participants={data.participants} />
+            </ReportSection>
+          )}
         </div>
       </div>
     </div>

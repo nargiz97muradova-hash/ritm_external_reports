@@ -1,13 +1,19 @@
 export type ProcedureStatus = "draft" | "in_progress" | "completed"
 
-/** Черновик — состав команды можно менять. Активный — отчёт можно показать руководителю и сотруднику ДРП. */
-export type TeamReportStatus = "draft" | "active"
+/**
+ * Черновик — состав команды можно менять.
+ * Активный — отчёт можно показать руководителю и сотруднику ДРП.
+ * Архив — доступ руководителю и ДРП закрыт, администратор только просматривает.
+ */
+export type TeamReportStatus = "draft" | "active" | "archived"
 
 /** Доступ участника к его отчёту. null — ссылка ещё не выдана / отчёта нет. */
 export type ReportAccess = "open" | "closed" | null
 
 export interface Participant {
   id: string
+  /** Персональный ID сотрудника, обычно 5–6 цифр */
+  personnelId: string
   fullName: string
   position: string
   sspUnit: string
@@ -16,6 +22,8 @@ export interface Participant {
   notify: boolean
   externalLink: string | null
   reportAccess: ReportAccess
+  /** ISO-дата формирования персонального отчёта; null — отчёта ещё нет */
+  reportFormedAt: string | null
 }
 
 export interface Procedure {
@@ -57,6 +65,8 @@ export interface TeamComparisonGroup {
   id: string
   name: string
   memberIds: string[]
+  /** Ключ цвета из палитры отчёта (sky, amber, …) */
+  color?: string
 }
 
 /**
@@ -78,6 +88,13 @@ export interface TeamReport {
    * Пустой массив — без доп. группировки (одна команда + руководители).
    */
   groups: TeamComparisonGroup[]
+  /** Участники, выделенные в группировке (акцент в отчёте). */
+  highlightedIds: string[]
+  /**
+   * id разделов содержания командного отчёта (см. REPORT_CONTENT_SECTIONS).
+   * По умолчанию — все разделы. Менять можно только в статусе «Черновик».
+   */
+  contentSections: string[]
   status: TeamReportStatus
   /** доступ руководителей к отчёту */
   reportAccess: Exclude<ReportAccess, null>
@@ -119,6 +136,8 @@ export interface TeamReportInput {
   hrbpIds: string[]
   memberIds: string[]
   groups: TeamComparisonGroup[]
+  highlightedIds: string[]
+  contentSections: string[]
 }
 
 /** Процедура, доступная для командного отчёта, — с участниками. */
@@ -126,6 +145,21 @@ export type ProcedureOption = Pick<
   Procedure,
   "id" | "name" | "status" | "startDate" | "endDate" | "participants"
 >
+
+/** Участник процедуры для раздела «Поиск сотрудника». */
+export interface EmployeeSearchHit {
+  id: string
+  personnelId: string
+  fullName: string
+  position: string
+  sspUnit: string
+  vspUnit: string
+  externalLogin: string
+  reportAccess: ReportAccess
+  procedureId: string
+  procedureName: string
+  procedureStatus: ProcedureStatus
+}
 
 export const PROCEDURE_TYPES = ['Опросник "Zetic"'] as const
 
@@ -138,4 +172,5 @@ export const STATUS_LABELS: Record<ProcedureStatus, string> = {
 export const TEAM_REPORT_STATUS_LABELS: Record<TeamReportStatus, string> = {
   draft: "Черновик",
   active: "Активный",
+  archived: "Архив",
 }

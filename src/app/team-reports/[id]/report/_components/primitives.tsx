@@ -1,4 +1,9 @@
-import { groupChipClass, groupDotClass } from "@/lib/report/group-colors"
+import {
+  groupChipClass,
+  groupChipStyle,
+  groupDotClass,
+  groupDotStyle,
+} from "@/lib/report/group-colors"
 import type { ReportParticipant } from "@/lib/report/types"
 import { cn } from "@/lib/utils"
 
@@ -14,7 +19,9 @@ export function Chip({
   size?: "sm" | "md"
 }) {
   const leader = participant.group === "leader"
-  const label = `${participant.number}. ${participant.fullName}${leader ? " — руководитель" : ""}`
+  const label = `${participant.number}. ${participant.fullName}${leader ? " — руководитель" : ""}${
+    participant.highlighted ? " — выделен" : ""
+  }`
   return (
     <span
       title={label}
@@ -22,8 +29,10 @@ export function Chip({
       className={cn(
         "inline-flex shrink-0 items-center justify-center rounded-full font-semibold tabular-nums",
         size === "sm" ? "size-5 text-[10px]" : "size-7 text-xs",
-        groupChipClass(participant.group, groupIds),
+        groupChipClass(participant.group, groupIds, participant.groupColor),
+        participant.highlighted && "ring-2 ring-foreground/70 ring-offset-1 ring-offset-background",
       )}
+      style={groupChipStyle(participant.groupColor)}
     >
       {participant.number}
     </span>
@@ -96,7 +105,7 @@ export function Explanation({ children }: { children: React.ReactNode }) {
 export function GroupLegend({
   groups,
 }: {
-  groups?: Array<{ id: string; name: string }>
+  groups?: Array<{ id: string; name: string; color?: string }>
 }) {
   const items =
     groups && groups.length > 0
@@ -110,7 +119,10 @@ export function GroupLegend({
     <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
       {items.map((g) => (
         <span key={g.id} className="inline-flex items-center gap-1.5">
-          <span className={cn("size-3 rounded-full", groupDotClass(g.id, ids))} />
+          <span
+            className={cn("size-3 rounded-full", groupDotClass(g.id, ids, g.color))}
+            style={groupDotStyle(g.color)}
+          />
           {g.name}
         </span>
       ))}

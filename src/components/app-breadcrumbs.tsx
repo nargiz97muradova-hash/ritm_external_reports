@@ -41,6 +41,10 @@ function crumbsFor(pathname: string): Crumb[] {
     ]
   if (pathname.startsWith("/team-reports/"))
     return [...base, { label: "Командные отчёты", href: "/team-reports" }, { label: "Командный отчёт" }]
+  if (pathname === "/reporting" || pathname.startsWith("/reporting/"))
+    return [...base, { label: "Отчётность" }]
+  if (pathname === "/employee-search" || pathname.startsWith("/employee-search/"))
+    return [...base, { label: "Поиск сотрудника" }]
   return base
 }
 

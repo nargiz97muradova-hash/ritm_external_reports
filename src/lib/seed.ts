@@ -1,5 +1,6 @@
-import type { Participant, Procedure, TeamReport } from "./types"
 import { buildExternalLink } from "./links"
+import { allReportContentSectionIds } from "./report/definitions"
+import type { Participant, Procedure, TeamReport } from "./types"
 
 // Все данные вымышленные — только для демонстрации интерфейса.
 
@@ -50,9 +51,17 @@ function makeParticipants(
     const n = procedureIndex * 1000 + i
     const id = `p${procedureIndex}-${i + 1}`
     let reportAccess: Participant["reportAccess"] = null
-    if (launched) reportAccess = i % 3 === 0 ? "open" : "closed"
+    let reportFormedAt: string | null = null
+    if (launched) {
+      reportAccess = i % 3 === 0 ? "open" : "closed"
+      // Демо-даты формирования персональных отчётов
+      const day = 1 + (n % 28)
+      const month = 9 + (n % 2)
+      reportFormedAt = `2026-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}T10:00:00.000Z`
+    }
     return {
       id,
+      personnelId: String(10000 + ((n * 7919) % 899999)),
       fullName: `${pick(LAST_NAMES, n * 7)} ${pick(FIRST_NAMES, n * 3 + 1)} ${pick(PATRONYMICS, n * 5 + 2)}`,
       position: pick(POSITIONS, n * 11),
       sspUnit: pick(SSP_UNITS, n * 13),
@@ -61,6 +70,7 @@ function makeParticipants(
       notify: true,
       externalLink: launched ? buildExternalLink(id) : null,
       reportAccess,
+      reportFormedAt,
     }
   })
 }
@@ -104,6 +114,8 @@ function makeSizedTeamReport(
     hrbpIds: hrbp ? [hrbp.id] : [],
     memberIds: members.map((m) => m.id),
     groups: [],
+    highlightedIds: [],
+    contentSections: allReportContentSectionIds(),
     status: "active",
     reportAccess: "open",
     hrbpReportAccess: "closed",
@@ -136,6 +148,8 @@ export function buildTeamReportSeed(procedures: Procedure[]): TeamReport[] {
         hrbpIds: team.length > 2 ? [team[1].id] : [],
         memberIds: team.slice(1).map((m) => m.id),
         groups: [],
+        highlightedIds: [],
+        contentSections: allReportContentSectionIds(),
         status: reports.length % 2 === 0 ? "draft" : "active",
         reportAccess: reports.length % 2 === 0 ? "closed" : "open",
         hrbpReportAccess: "closed",

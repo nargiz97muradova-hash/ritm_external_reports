@@ -346,3 +346,45 @@ export const LEARNING_AXES = {
   left: "Активное экспериментирование",
   right: "Тестирование и размышление",
 }
+
+/** Разделы, которые можно включать/выключать в содержании командного отчёта. */
+export const REPORT_CONTENT_SECTIONS = [
+  { id: "participants", title: "Состав участников" },
+  { id: "groups", title: "Группы участников" },
+  { id: "integral-all", title: "Интегральный отчёт: все участники" },
+  { id: "integral-team", title: "Интегральный отчёт: команда" },
+  { id: "traffic", title: "Разметка компетенций" },
+  { id: "roles", title: "Распределение ролей" },
+  { id: "role-descriptions", title: "Расшифровка профилей" },
+  { id: "potential", title: "Матрица потенциала" },
+  ...SCALE_SECTIONS.map((s) => ({ id: s.key, title: s.title })),
+  ...SCALE_SECTIONS.map((s) => ({
+    id: `heat-${s.key}`,
+    title: `Тепловая карта: ${s.title.toLowerCase()}`,
+  })),
+  { id: "learning", title: "Стили обучения" },
+] as const
+
+export type ReportContentSectionId = (typeof REPORT_CONTENT_SECTIONS)[number]["id"]
+
+const REPORT_CONTENT_SECTION_IDS = new Set<string>(
+  REPORT_CONTENT_SECTIONS.map((s) => s.id),
+)
+
+export function allReportContentSectionIds(): ReportContentSectionId[] {
+  return REPORT_CONTENT_SECTIONS.map((s) => s.id)
+}
+
+/**
+ * Оставляет только известные id разделов в порядке REPORT_CONTENT_SECTIONS.
+ * null/undefined → все разделы (значение по умолчанию).
+ */
+export function normalizeReportContentSections(
+  ids: readonly string[] | undefined | null,
+): ReportContentSectionId[] {
+  if (ids == null) return allReportContentSectionIds()
+  const selected = new Set(
+    ids.filter((id): id is ReportContentSectionId => REPORT_CONTENT_SECTION_IDS.has(id)),
+  )
+  return REPORT_CONTENT_SECTIONS.map((s) => s.id).filter((id) => selected.has(id))
+}

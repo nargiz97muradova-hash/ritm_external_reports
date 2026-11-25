@@ -65,7 +65,7 @@ export function DraftParticipants({
     } else {
       onChange([
         ...participants,
-        { ...data, id: newId(), externalLink: null, reportAccess: null },
+        { ...data, id: newId(), externalLink: null, reportAccess: null, reportFormedAt: null },
       ])
     }
     setDialog({ open: false, editing: null })

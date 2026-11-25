@@ -21,6 +21,8 @@ export type ReportGroupKind = string
 export interface ReportGroup {
   id: ReportGroupKind
   name: string
+  /** Ключ цвета из палитры; для системных групп может отсутствовать */
+  color?: string
 }
 
 export interface ReportParticipant {
@@ -30,6 +32,10 @@ export interface ReportParticipant {
   fullName: string
   position: string
   group: ReportGroupKind
+  /** Цвет группы участника (если задан при группировке) */
+  groupColor?: string
+  /** Акцент в отчёте (отмечен при группировке) */
+  highlighted: boolean
   results: ParticipantResults
 }
 

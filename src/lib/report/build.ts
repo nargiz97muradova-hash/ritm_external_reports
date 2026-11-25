@@ -30,8 +30,16 @@ function integral(participants: ReportParticipant[]): IntegralPoint[] {
 }
 
 /** Собирает данные командного отчёта: участники, группы и агрегаты. */
-export function buildTeamReportData(report: TeamReport, procedure: Procedure): TeamReportData {
-  const byId = new Map(procedure.participants.map((p) => [p.id, p]))
+export function buildTeamReportData(
+  report: TeamReport,
+  procedure: Procedure,
+  /** Участники могут быть из других процедур — передайте все нужные. */
+  extraProcedures: Array<Pick<Procedure, "participants">> = [],
+): TeamReportData {
+  const byId = new Map<string, Procedure["participants"][number]>()
+  for (const pool of [procedure, ...extraProcedures]) {
+    for (const p of pool.participants) byId.set(p.id, p)
+  }
   const customGroups = (report.groups ?? []).filter((g) => g.memberIds.length > 0 && g.name.trim())
 
   const memberGroupId = new Map<string, string>()
@@ -52,6 +60,9 @@ export function buildTeamReportData(report: TeamReport, procedure: Procedure): T
     }
   }
 
+  const highlighted = new Set(report.highlightedIds ?? [])
+  const groupColorById = new Map(customGroups.map((g) => [g.id, g.color]))
+
   const participants: ReportParticipant[] = people
     .map(({ id, group }) => {
       const p = byId.get(id)!
@@ -61,6 +72,8 @@ export function buildTeamReportData(report: TeamReport, procedure: Procedure): T
         fullName: p.fullName,
         position: p.position,
         group,
+        groupColor: groupColorById.get(group),
+        highlighted: highlighted.has(id),
         results: demoResults(id),
       }
     })
@@ -69,7 +82,9 @@ export function buildTeamReportData(report: TeamReport, procedure: Procedure): T
 
   const groups: ReportGroup[] = []
   if (customGroups.length > 0) {
-    for (const g of customGroups) groups.push({ id: g.id, name: g.name.trim() })
+    for (const g of customGroups) {
+      groups.push({ id: g.id, name: g.name.trim(), color: g.color })
+    }
     const ungrouped = participants.filter((p) => p.group === "team")
     if (ungrouped.length > 0) groups.push({ id: "team", name: "Без группы" })
   } else {

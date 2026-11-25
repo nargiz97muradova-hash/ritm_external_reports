@@ -15,9 +15,13 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import type { Participant } from "@/lib/types"
 
-export type ParticipantDraft = Omit<Participant, "id" | "externalLink" | "reportAccess">
+export type ParticipantDraft = Omit<
+  Participant,
+  "id" | "externalLink" | "reportAccess" | "reportFormedAt"
+>
 
 const EMPTY: ParticipantDraft = {
+  personnelId: "",
   fullName: "",
   position: "",
   sspUnit: "",
@@ -27,6 +31,7 @@ const EMPTY: ParticipantDraft = {
 }
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+const PERSONNEL_ID = /^\d{5,6}$/
 
 export function ParticipantDialog({
   open,
@@ -68,11 +73,29 @@ function ParticipantForm({
   existingLogins: Set<string>
   onSubmit: (data: ParticipantDraft) => void
 }) {
-  const [form, setForm] = useState<ParticipantDraft>(initial ?? EMPTY)
+  const [form, setForm] = useState<ParticipantDraft>(() =>
+    initial
+      ? {
+          personnelId: initial.personnelId ?? "",
+          fullName: initial.fullName,
+          position: initial.position,
+          sspUnit: initial.sspUnit,
+          vspUnit: initial.vspUnit,
+          externalLogin: initial.externalLogin,
+          notify: initial.notify,
+        }
+      : EMPTY,
+  )
   const [touched, setTouched] = useState(false)
 
   const login = form.externalLogin.trim()
+  const personnelId = form.personnelId.trim()
   const errors = {
+    personnelId: !personnelId
+      ? "Укажите персональный ID"
+      : !PERSONNEL_ID.test(personnelId)
+        ? "Персональный ID — 5 или 6 цифр"
+        : null,
     fullName: !form.fullName.trim() ? "Укажите ФИО" : null,
     externalLogin: !login
       ? "Укажите внешний логин"
@@ -105,10 +128,20 @@ function ParticipantForm({
         </DialogDescription>
       </DialogHeader>
 
+      <Field id="p-personnel" label="Персональный ID" required error={touched ? errors.personnelId : null}>
+        <Input
+          id="p-personnel"
+          autoFocus
+          inputMode="numeric"
+          value={form.personnelId}
+          placeholder="123456"
+          aria-invalid={(touched && !!errors.personnelId) || undefined}
+          onChange={(e) => set("personnelId", e.target.value.replace(/\D/g, "").slice(0, 6))}
+        />
+      </Field>
       <Field id="p-name" label="ФИО" required error={touched ? errors.fullName : null}>
         <Input
           id="p-name"
-          autoFocus
           value={form.fullName}
           placeholder="Фамилия Имя Отчество"
           aria-invalid={(touched && !!errors.fullName) || undefined}

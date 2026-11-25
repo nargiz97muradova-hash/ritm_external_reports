@@ -31,6 +31,11 @@ function validate(input: ProcedureInput): string | null {
     return "Дата окончания не может быть раньше даты начала"
   for (const p of input.participants) {
     if (!p.fullName.trim()) return "У каждого сотрудника должно быть указано ФИО"
+    const personnelId = p.personnelId?.trim() ?? ""
+    if (!personnelId)
+      return `Укажите персональный ID для сотрудника «${p.fullName || "без ФИО"}»`
+    if (!/^\d{5,6}$/.test(personnelId))
+      return `Персональный ID «${personnelId}» должен содержать 5 или 6 цифр`
     if (!p.externalLogin.trim())
       return `Укажите внешний логин для сотрудника «${p.fullName}»`
   }
@@ -46,6 +51,7 @@ function validate(input: ProcedureInput): string | null {
 function cleanParticipants(list: Participant[]): Participant[] {
   return list.map((p) => ({
     id: p.id,
+    personnelId: p.personnelId.trim(),
     fullName: p.fullName.trim(),
     position: p.position.trim(),
     sspUnit: p.sspUnit.trim(),
@@ -54,6 +60,7 @@ function cleanParticipants(list: Participant[]): Participant[] {
     notify: Boolean(p.notify),
     externalLink: p.externalLink ?? null,
     reportAccess: p.reportAccess ?? null,
+    reportFormedAt: p.reportAccess ? (p.reportFormedAt ?? null) : null,
   }))
 }
 
@@ -105,11 +112,17 @@ export async function launchProcedureAction(id: string): Promise<Result> {
   if (existing.status !== "draft") return fail("Процедура уже запущена")
   if (existing.participants.length === 0)
     return fail("Добавьте хотя бы одного сотрудника перед запуском")
+  const formedAt = new Date().toISOString()
   await store.updateProcedure(id, (p) => {
     p.status = "in_progress"
     for (const participant of p.participants) {
       participant.externalLink ??= buildExternalLink(participant.id)
-      participant.reportAccess ??= "closed"
+      if (participant.reportAccess === null) {
+        participant.reportAccess = "closed"
+        participant.reportFormedAt = formedAt
+      } else {
+        participant.reportFormedAt ??= formedAt
+      }
     }
   })
   revalidate()
@@ -148,6 +161,7 @@ export async function duplicateProcedureAction(
       id: `${stamp}-${i + 1}`,
       externalLink: null,
       reportAccess: null,
+      reportFormedAt: null,
     })),
   })
   revalidate()
@@ -185,6 +199,7 @@ export async function setReportAccessAction(
 // ---------- Excel ----------
 
 const EXCEL_COLUMNS = [
+  { header: "Персональный ID", key: "personnelId", width: 16 },
   { header: "ФИО", key: "fullName", width: 36 },
   { header: "Должность", key: "position", width: 30 },
   { header: "Подразделение ССП", key: "sspUnit", width: 44 },
@@ -263,6 +278,7 @@ export async function importParticipantsAction(
     if (!fullName && !externalLogin) return
     const notify = get("Отправить уведомление").toLowerCase()
     participants.push({
+      personnelId: get("Персональный ID"),
       fullName,
       position: get("Должность"),
       sspUnit: get("Подразделение ССП"),
@@ -271,6 +287,7 @@ export async function importParticipantsAction(
       notify: notify === "" || ["да", "1", "true", "yes"].includes(notify),
       externalLink: null,
       reportAccess: null,
+      reportFormedAt: null,
     })
   })
   if (participants.length === 0) return fail("В файле нет строк с сотрудниками")

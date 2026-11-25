@@ -6,8 +6,6 @@ type Importable = {
   externalLogin: string
 }
 
-type ProcedurePool = { id: string; participants: { id: string }[] }
-
 export type ImportMatch<T extends Importable> =
   | { matched: false; unknown: number; duplicates: number }
   | {
@@ -15,13 +13,12 @@ export type ImportMatch<T extends Importable> =
       accepted: T[]
       unknown: number
       duplicates: number
-      skippedOtherProc: number
-      targetProcedureId: string
     }
 
 /**
  * Сопоставляет строки Excel с участниками процедур по внешнему логину.
- * Команда остаётся в одной процедуре — в той, где совпадений больше.
+ * Участников можно брать из разных процедур; при нескольких совпадениях
+ * предпочтительна текущая основная процедура отчёта.
  */
 export function matchImportedMembers<T extends Importable>(
   rows: { externalLogin: string }[],
@@ -71,57 +68,36 @@ export function matchImportedMembers<T extends Importable>(
 
   if (matched.length === 0) return { matched: false, unknown, duplicates }
 
-  const countByProc = new Map<string, number>()
-  for (const person of matched) {
-    countByProc.set(person.procedureId, (countByProc.get(person.procedureId) ?? 0) + 1)
-  }
-  let targetProcedureId = preferredProcedureId ?? matched[0].procedureId
-  let best = 0
-  for (const [id, count] of countByProc) {
-    if (count > best) {
-      best = count
-      targetProcedureId = id
-    }
-  }
-  const accepted = matched.filter((person) => person.procedureId === targetProcedureId)
   return {
     matched: true,
-    accepted,
+    accepted: matched,
     unknown,
     duplicates,
-    skippedOtherProc: matched.length - accepted.length,
-    targetProcedureId,
   }
 }
 
-/** Новые участники, руководители и группы после загрузки Excel. */
-export function formAfterMemberImport(
+/** Новые участники и группы после загрузки Excel (из любых процедур). */
+export function formAfterMemberImport<T extends Importable>(
   form: TeamReportInput,
-  procedures: ProcedurePool[],
-  acceptedIds: string[],
-  targetProcedureId: string,
-): Pick<TeamReportInput, "procedureId" | "memberIds" | "leaderIds" | "groups"> {
-  const inProcedure = new Set(
-    procedures.find((procedure) => procedure.id === targetProcedureId)?.participants.map((p) => p.id) ??
-      [],
-  )
-  const keptMembers =
-    form.procedureId === targetProcedureId
-      ? form.memberIds.filter((id) => inProcedure.has(id))
-      : []
-  const memberIds = [...new Set([...keptMembers, ...acceptedIds])]
+  accepted: T[],
+): Pick<TeamReportInput, "procedureId" | "memberIds" | "leaderIds" | "groups" | "highlightedIds"> {
+  const acceptedIds = accepted.map((person) => person.id)
+  const addedSet = new Set(acceptedIds)
+  const memberIds = [...form.memberIds.filter((id) => !addedSet.has(id)), ...acceptedIds]
+  const memberSet = new Set(memberIds)
   return {
-    procedureId: targetProcedureId,
+    procedureId:
+      form.procedureId ||
+      accepted[0]?.procedureId ||
+      "",
     memberIds,
-    leaderIds: form.leaderIds.filter((id) => inProcedure.has(id)),
-    groups:
-      form.procedureId === targetProcedureId
-        ? form.groups
-            .map((group) => ({
-              ...group,
-              memberIds: group.memberIds.filter((id) => memberIds.includes(id)),
-            }))
-            .filter((group) => group.memberIds.length > 0)
-        : [],
+    leaderIds: form.leaderIds.filter((id) => !addedSet.has(id)),
+    groups: form.groups
+      .map((group) => ({
+        ...group,
+        memberIds: group.memberIds.filter((id) => memberIds.includes(id)),
+      }))
+      .filter((group) => group.memberIds.length > 0),
+    highlightedIds: form.highlightedIds.filter((id) => memberSet.has(id)),
   }
 }

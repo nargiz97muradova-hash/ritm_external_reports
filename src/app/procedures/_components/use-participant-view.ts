@@ -4,9 +4,9 @@ import { useMemo, useState } from "react"
 import { compareValues, nextSort, type SortDir } from "@/components/sort-button"
 import type { Participant } from "@/lib/types"
 
-export type SortKey = "fullName" | "externalLink"
+export type SortKey = "fullName" | "externalLink" | "personnelId"
 export type ListFilterKey = "position" | "sspUnit" | "vspUnit" | "reportAccess"
-export type SearchKey = "fullName" | "externalLogin"
+export type SearchKey = "fullName" | "externalLogin" | "personnelId"
 
 /** Сортировка, поиск и фильтры по колонкам таблицы сотрудников. */
 export function useParticipantView<T extends Participant>(participants: T[]) {
@@ -14,6 +14,7 @@ export function useParticipantView<T extends Participant>(participants: T[]) {
   const [search, setSearch] = useState<Record<SearchKey, string>>({
     fullName: "",
     externalLogin: "",
+    personnelId: "",
   })
   const [filters, setFilters] = useState<Record<ListFilterKey, string[]>>({
     position: [],
@@ -26,10 +27,12 @@ export function useParticipantView<T extends Participant>(participants: T[]) {
     const q = {
       fullName: search.fullName.trim().toLowerCase(),
       externalLogin: search.externalLogin.trim().toLowerCase(),
+      personnelId: search.personnelId.trim().toLowerCase(),
     }
     let list: T[] = participants.filter((p) => {
       if (q.fullName && !p.fullName.toLowerCase().includes(q.fullName)) return false
       if (q.externalLogin && !p.externalLogin.toLowerCase().includes(q.externalLogin)) return false
+      if (q.personnelId && !(p.personnelId ?? "").toLowerCase().includes(q.personnelId)) return false
       for (const key of ["position", "sspUnit", "vspUnit"] as const) {
         if (filters[key].length && !filters[key].includes(p[key])) return false
       }
@@ -57,7 +60,7 @@ export function useParticipantView<T extends Participant>(participants: T[]) {
     filters,
     setFilter: (key: ListFilterKey, value: string[]) => setFilters((f) => ({ ...f, [key]: value })),
     reset: () => {
-      setSearch({ fullName: "", externalLogin: "" })
+      setSearch({ fullName: "", externalLogin: "", personnelId: "" })
       setFilters({ position: [], sspUnit: [], vspUnit: [], reportAccess: [] })
     },
   }
